@@ -1,0 +1,26 @@
+﻿# Virtual environments
+venv/
+.venv/
+env/
+
+# Python cache
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Model weights
+*.pt
+*.onnx
+*.engine
+
+# Output logs and incident snapshots
+alerts/
+*.log
+
+# Dev harness & editor
+.offgit/
+.cursor/
+.cursorrules
+CLAUDE.md
+CODEX.md
+OPENCODE.md
