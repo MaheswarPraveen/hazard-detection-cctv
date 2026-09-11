@@ -24,3 +24,8 @@ alerts/
 CLAUDE.md
 CODEX.md
 OPENCODE.md
+logs/
+.env
+.env.*
+*.env
+*.pyc
