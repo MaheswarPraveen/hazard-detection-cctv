@@ -1,0 +1,104 @@
+<!doctype html><html data-theme="dark"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Safety CCTV</title>
+<style>
+:root{--bg:#0f141b;--card:#182029;--border:#26313d;--text:#e8eef4;--muted:#8b98a8;--accent:#22c55e;--danger:#ef4444}
+[data-theme="light"]{--bg:#f4f6f8;--card:#ffffff;--border:#e3e8ee;--text:#1c2530;--muted:#6b7686}
+*{box-sizing:border-box;margin:0;padding:0}
+body{font-family:-apple-system,"Segoe UI",Roboto,Arial,sans-serif;background:var(--bg);color:var(--text);max-width:1060px;margin:0 auto;padding:28px 18px 60px;transition:background .3s,color .3s}
+.top{display:flex;align-items:flex-start;justify-content:space-between;margin-bottom:4px}
+h1{font-size:22px;font-weight:700}
+#clock{font-variant-numeric:tabular-nums;font-size:13px;color:var(--muted);margin-top:4px}
+.sub{color:var(--muted);font-size:13px;margin-bottom:22px}
+#theme{border:1px solid var(--border);background:var(--card);color:var(--text);border-radius:20px;padding:7px 16px;font-size:13px;font-weight:600;cursor:pointer;white-space:nowrap}
+.grid{display:grid;grid-template-columns:1fr 1fr;gap:14px;margin-bottom:14px}
+@media(max-width:700px){.grid{grid-template-columns:1fr}}
+.card{background:var(--card);border:1px solid var(--border);border-radius:12px;padding:18px;transition:background .3s,border .3s}
+.card h2{font-size:16px;margin-bottom:4px}
+.card p{font-size:13px;color:var(--muted);margin-bottom:12px}
+.dot{display:inline-block;width:9px;height:9px;border-radius:50%;margin-right:6px;transition:background .3s}
+.dot.pulse{animation:blink 1.2s infinite}
+@keyframes blink{50%{opacity:.35}}
+.on{background:var(--accent)}.off{background:#5b6b7d}
+.status{font-size:13px;font-weight:600;margin-bottom:12px}
+button.act{border:0;border-radius:8px;padding:9px 18px;font-size:14px;font-weight:600;cursor:pointer;margin-right:8px;transition:transform .1s}
+button.act:active{transform:scale(.96)}
+.start{background:#16a34a;color:#fff}.start:hover{background:#15803d}
+.stop{background:transparent;color:var(--text);border:1px solid var(--border)}
+button.act:disabled{opacity:.4;cursor:default}
+.stats{display:grid;grid-template-columns:repeat(4,1fr);gap:14px;margin:14px 0}
+@media(max-width:700px){.stats{grid-template-columns:1fr 1fr}}
+.stat{background:var(--card);border:1px solid var(--border);border-radius:12px;padding:14px 16px;transition:background .3s}
+.stat b{font-size:24px;display:block;font-variant-numeric:tabular-nums;transition:color .3s}
+.stat b.bump{color:var(--danger)}
+.stat span{font-size:12px;color:var(--muted)}
+.panel{background:var(--card);border:1px solid var(--border);border-radius:12px;padding:18px;margin-top:14px;transition:background .3s}
+.panel h2{font-size:15px;margin-bottom:10px}
+a.btn{display:inline-block;background:#2563eb;color:#fff;text-decoration:none;border-radius:8px;padding:8px 16px;font-size:13px;font-weight:600;margin:0 8px 8px 0}
+a.btn:hover{background:#1d4ed8}
+.gal{display:grid;grid-template-columns:repeat(auto-fill,minmax(150px,1fr));gap:10px;margin-top:8px}
+.gal a{display:block;border-radius:8px;overflow:hidden;border:1px solid var(--border);animation:fadein .4s}
+@keyframes fadein{from{opacity:0;transform:translateY(4px)}}
+.gal img{width:100%;height:110px;object-fit:cover;display:block}
+.gal span{display:block;font-size:11px;padding:5px 7px;color:var(--muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.empty{color:var(--muted);font-size:13px}
+h3.split{font-size:13px;color:var(--muted);margin:12px 0 4px;text-transform:uppercase;letter-spacing:.06em}
+h3.split:first-of-type{margin-top:0}
+</style></head><body>
+<div class="top"><div><h1>Safety CCTV Console</h1><div id="clock">--:--:--</div></div>
+<button id="theme" onclick="toggleTheme()">Light mode</button></div>
+<div class="sub">Workplace safety monitoring &mdash; zone intrusion + PPE compliance</div>
+<div class="grid">
+ <div class="card"><h2>Zone Alert</h2><p>Restricted danger-zone intrusion alarm</p>
+  <div class="status" id="s-zone"><span class="dot off"></span>checking&hellip;</div>
+  <button class="act start" id="b-zone-start" onclick="ctl('zone','start')">Start</button><button class="act stop" id="b-zone-stop" onclick="ctl('zone','stop')">Stop</button></div>
+ <div class="card"><h2>PPE Check</h2><p>Helmet + vest live warnings</p>
+  <div class="status" id="s-ppe"><span class="dot off"></span>checking&hellip;</div>
+  <button class="act start" id="b-ppe-start" onclick="ctl('ppe','start')">Start</button><button class="act stop" id="b-ppe-stop" onclick="ctl('ppe','stop')">Stop</button></div>
+</div>
+<div class="stats">
+ <div class="stat"><b id="st-entries">0</b><span>danger entries today</span></div>
+ <div class="stat"><b id="st-visitors">0</b><span>visitors seen</span></div>
+ <div class="stat"><b id="st-nohelmet">0</b><span>no-helmet events</span></div>
+ <div class="stat"><b id="st-novest">0</b><span>no-vest events</span></div>
+</div>
+<div class="panel"><h2>Reports &amp; data</h2>
+ <a class="btn" href="/files/logs/PLACEHOLDER_ZONE">Zone CSV</a>
+ <a class="btn" href="/files/logs/PLACEHOLDER_PPE">PPE tally CSV</a>
+ <a class="btn" href="/api/report?mode=zone">Zone Excel</a>
+ <a class="btn" href="/api/report?mode=ppe">PPE Excel</a>
+ <div class="sub" style="margin:6px 0 0">Excel is generated on demand from today's data.</div></div>
+<div class="panel"><h2>Evidence &mdash; today</h2>
+ <h3 class="split">Zone intrusions</h3><div class="gal" id="gal-zone"><span class="empty">loading&hellip;</span></div>
+ <h3 class="split">PPE violations</h3><div class="gal" id="gal-ppe"><span class="empty">loading&hellip;</span></div></div>
+<script>
+(function(){const t=localStorage.getItem('theme');if(t)document.documentElement.dataset.theme=t;})();
+function toggleTheme(){const h=document.documentElement;h.dataset.theme=h.dataset.theme==='dark'?'light':'dark';localStorage.setItem('theme',h.dataset.theme);syncBtn();}
+function syncBtn(){document.getElementById('theme').textContent=document.documentElement.dataset.theme==='dark'?'Light mode':'Dark mode';}
+syncBtn();
+setInterval(()=>{document.getElementById('clock').textContent=new Date().toLocaleString();},1000);
+document.getElementById('clock').textContent=new Date().toLocaleString();
+function setNum(id,v){const e=document.getElementById(id);if(e.textContent!=String(v)){e.textContent=v;e.classList.add('bump');setTimeout(()=>e.classList.remove('bump'),600);}}
+let lastGal='';
+async function refresh(){
+ const r=await fetch('/api/status');const j=await r.json();
+ for(const m of ['zone','ppe']){
+  const on=j.modes[m];
+  document.getElementById('s-'+m).innerHTML='<span class="dot '+(on?'on pulse':'off')+'"></span>'+(on?'Running':'Stopped');
+  document.getElementById('b-'+m+'-start').disabled=on;
+  document.getElementById('b-'+m+'-stop').disabled=!on;
+ }
+ setNum('st-entries',j.stats.entries);setNum('st-visitors',j.stats.visitors);
+ setNum('st-nohelmet',j.stats.no_helmet);setNum('st-novest',j.stats.no_vest);
+ const key=JSON.stringify(j.evidence);
+ if(key!==lastGal){lastGal=key;renderGal(j.evidence);}
+}
+function card(e){return '<a href="/files/evidence/'+e.day+'/'+e.name+'" target="_blank"><img src="/files/evidence/'+e.day+'/'+e.name+'" loading="lazy"><span>'+e.name+'</span></a>';}
+function renderGal(ev){
+ const z=ev.filter(e=>e.kind==='zone'),p=ev.filter(e=>e.kind==='ppe');
+ document.getElementById('gal-zone').innerHTML=z.length?z.map(card).join(''):'<span class="empty">No zone intrusions today.</span>';
+ document.getElementById('gal-ppe').innerHTML=p.length?p.map(card).join(''):'<span class="empty">No PPE evidence (photo capture is off in PPE mode).</span>';
+}
+async function ctl(m,a){await fetch('/api/'+a+'?mode='+m,{method:'POST'});setTimeout(refresh,800);}
+refresh();setInterval(refresh,3000);
+</script></body></html>

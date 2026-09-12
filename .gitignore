@@ -1,4 +1,4 @@
-﻿# Virtual environments
+# Virtual environments
 venv/
 .venv/
 env/
@@ -7,25 +7,37 @@ env/
 __pycache__/
 *.py[cod]
 *$py.class
+*.pyc
 
-# Model weights
-*.pt
-*.onnx
+# Heavy redundant weights (only default lightweight models are tracked)
+ppe_v8m.pt
+yolo26s.pt
+yolo26n.pt
+yolov8n.pt
+yolo11n.pt
 *.engine
+.cache/
 
-# Output logs and incident snapshots
+# Dynamic runtime evidence, photos & incident logs (never committed)
+evidence/
+logs/
+reports/
 alerts/
+*.jpg
+*.jpeg
+*.png
+*.csv
+*.xlsx
 *.log
+*.err.log
 
-# Dev harness & editor
+# Dev harness & editor clutter
 .offgit/
 .cursor/
 .cursorrules
 CLAUDE.md
 CODEX.md
 OPENCODE.md
-logs/
 .env
 .env.*
 *.env
-*.pyc
