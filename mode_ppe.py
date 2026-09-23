@@ -824,23 +824,8 @@ def main():
             hud = shared["hud"]
             hud_tally = dict(hud["tally"])
             ready = shared["models_ready"]
-        # side status board (right): MASK: OK / MASK: NO MASK, etc. No boxes.
         fh, fw = frame.shape[:2]
-        bw, bh = 215, 34 + 30 * max(1, len(panel))
-        bx0, by0 = fw - bw - 10, 90
-        cv2.rectangle(frame, (bx0, by0), (fw - 10, by0 + bh), (25, 25, 25), -1)
-        cv2.putText(frame, "PPE STATUS", (bx0 + 10, by0 + 24),
-                    cv2.FONT_HERSHEY_SIMPLEX, 0.55, (255, 255, 255), 2)
-        for i, (plabel, state) in enumerate(panel):
-            if state == "ok":
-                ptxt, pcol = f"{plabel}: OK", (0, 210, 0)
-            elif state == "bad":
-                ptxt, pcol = f"{plabel}: NO {plabel}", (0, 0, 255)
-            else:
-                ptxt, pcol = f"{plabel}: --", (150, 150, 150)
-            cv2.putText(frame, ptxt, (bx0 + 10, by0 + 54 + i * 30),
-                        cv2.FONT_HERSHEY_SIMPLEX, 0.6, pcol, 2)
-        if not ready:  # models still loading: live video + banner, AI boxes pop in later
+        if not ready:  # models still loading: live video + banner, AI states pop in later
             cv2.rectangle(frame, (8, 88), (330, 118), (25, 25, 25), -1)
             cv2.putText(frame, "LOADING AI MODELS...", (16, 109),
                         cv2.FONT_HERSHEY_SIMPLEX, 0.6, (255, 255, 255), 2)
@@ -850,20 +835,24 @@ def main():
         cv2.circle(frame, (26, 23), 6, (255, 255, 255), -1)
         cv2.putText(frame, "WARNING" if v > 0 else "ALL COMPLIANT", (40, 28),
                     cv2.FONT_HERSHEY_SIMPLEX, 0.6, (255, 255, 255), 2)
-        line2 = (f"{hud['persons']} in view | {hud['visitors']} visitors | "
-                 f"AI {hud['infer_fps']:.0f} + CAM {cam_fps:.0f} FPS")
-        (tw2, th2), _ = cv2.getTextSize(line2, cv2.FONT_HERSHEY_SIMPLEX, 0.5, 1)
-        cv2.rectangle(frame, (6, 54 - th2 - 8), (14 + tw2, 58), (25, 25, 25), -1)
-        cv2.putText(frame, line2, (10, 54),
-                    cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 255, 255), 1)
-        names = {"no_helmet": "No helmet", "no_vest": "No vest",
-                 "no_gloves": "No gloves", "no_mask": "No mask"}
-        line3 = (" | ".join(f"{names[k]}: {hud_tally[k]}" for k in hud_tally)
-                 + f" | OK: {hud['ok']}")
-        (tw3, th3), _ = cv2.getTextSize(line3, cv2.FONT_HERSHEY_SIMPLEX, 0.5, 1)
-        cv2.rectangle(frame, (6, 70 - th3 - 8), (14 + tw3, 74), (25, 25, 25), -1)
-        cv2.putText(frame, line3, (10, 70),
-                    cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 255, 255), 1)
+        # bottom status bar: one dark strip, dots + labels per item.
+        # green = worn, red = missing, gray = nobody in view. Tallies live on
+        # the dashboard, not on the video.
+        cv2.rectangle(frame, (0, fh - 32), (fw, fh), (20, 20, 20), -1)
+        bx = 12
+        for (plabel, state) in panel:
+            dot = (0, 200, 0) if state == "ok" else ((0, 0, 255) if state == "bad" else (130, 130, 130))
+            cv2.circle(frame, (bx + 6, fh - 16), 6, dot, -1)
+            cv2.putText(frame, plabel, (bx + 17, fh - 11),
+                        cv2.FONT_HERSHEY_SIMPLEX, 0.5, (235, 235, 235), 1)
+            (tw, _th), _ = cv2.getTextSize(plabel, cv2.FONT_HERSHEY_SIMPLEX, 0.5, 1)
+            bx += 17 + tw + 20
+        cv2.putText(frame, f"{hud['persons']} in view", (bx, fh - 11),
+                    cv2.FONT_HERSHEY_SIMPLEX, 0.5, (235, 235, 235), 1)
+        fps_txt = f"AI {hud['infer_fps']:.0f} + CAM {cam_fps:.0f} FPS"
+        (twf, _thf), _ = cv2.getTextSize(fps_txt, cv2.FONT_HERSHEY_SIMPLEX, 0.5, 1)
+        cv2.putText(frame, fps_txt, (fw - twf - 12, fh - 11),
+                    cv2.FONT_HERSHEY_SIMPLEX, 0.5, (160, 160, 160), 1)
 
         now2 = time.time()
         ctn += 1
