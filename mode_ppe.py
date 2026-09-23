@@ -420,57 +420,14 @@ def main():
     CHECK_MG = CHECKS == {"mask", "gloves"}
     TAG = "hv" if CHECK_HV else "mg" if CHECK_MG else "all" if len(CHECKS) == 4 else "custom"
 
-    wpath = BASE / args.model if not Path(args.model).exists() else Path(args.model)
-    model = YOLO(str(wpath))
-    ids = resolve_ids(model)
-    HAS_MASK = (ids["MASK"] is not None or ids["NO_MASK"] is not None) and not args.ignore_mask \
-        and "mask" in CHECKS
-    HAS_GLOVES_MAIN = (ids["GLOVES"] is not None or ids["NO_GLOVES"] is not None) and not args.ignore_gloves
-
-    gmodel, gids = None, {}
-    if args.gloves_model and not args.ignore_gloves and "gloves" in CHECKS:
-        gpath = BASE / args.gloves_model if not Path(args.gloves_model).exists() else Path(args.gloves_model)
-        if gpath.exists():
-            gmodel = YOLO(str(gpath))
-            gids = resolve_ids(gmodel)
-            print(f"[INFO] gloves backup {gpath.name}: "
-                  f"GLOVES={gids['GLOVES']} NO_GLOVES={gids['NO_GLOVES']}", flush=True)
-            if gids["GLOVES"] is None and gids["NO_GLOVES"] is None:
-                print("[!] gloves-model has no glove classes - ignoring it", flush=True)
-                gmodel = None
-        else:
-            print(f"[!] --gloves-model {args.gloves_model} not found - gloves from primary model only", flush=True)
-
-    global BOX_COLORS
-    BOX_COLORS = {v: c for v, c in [
-        (ids["HARDHAT"], (0, 255, 0)), (ids["NO_HARDHAT"], (0, 0, 255)),
-        (ids["VEST"], (0, 255, 0)), (ids["NO_VEST"], (0, 0, 255)),
-        (ids["MASK"], (0, 255, 255)), (ids["NO_MASK"], (0, 165, 255)),
-        (ids["GLOVES"], (255, 0, 0)), (ids["NO_GLOVES"], (255, 0, 255)),
-    ] if v is not None}
-
-    print(f"[INFO] Model {wpath.name} classes: {model.names}", flush=True)
-    print(f"[INFO] ids HARDHAT={ids['HARDHAT']} NO_HARDHAT={ids['NO_HARDHAT']} VEST={ids['VEST']} "
-          f"NO_VEST={ids['NO_VEST']} PERSON={ids['PERSON']} GLOVES={ids['GLOVES']} "
-          f"NO_GLOVES={ids['NO_GLOVES']} MASK={ids['MASK']} NO_MASK={ids['NO_MASK']}", flush=True)
-    base = min_thresh(args, ids)
-    print(f"[INFO] thresholds base={base:.2f} person={args.person_conf:.2f} ppe={args.ppe_conf:.2f} "
-          f"mask={args.mask_conf:.2f} glove={args.glove_conf:.2f} smooth={args.smooth} imgsz={args.imgsz}",
-          flush=True)
-    if ids["GLOVES"] is None and gmodel is None and not args.ignore_gloves:
-        print("[INFO] primary model has no glove classes -> glove check OFF "
-              "(enable with --gloves-model ppe_v8m.pt at 2-3 m gate)", flush=True)
-
-    # single-photo test path (no camera needed)
+    # single-photo test path (loads models itself, no camera needed)
     if Path(str(args.source)).suffix.lower() in IMG_EXTS and Path(str(args.source)).exists():
-        run_image_test(args, model, ids, gmodel, gids, CHECKS)
+        _m, _ids, _hm, _hg, _gm, _gg, _base = load_models(args, CHECKS)
+        run_image_test(args, _m, _ids, _gm, _gg, CHECKS)
         return
 
-    print("[...] Warming up model (3 dummy frames)...", flush=True)
-    for _ in range(3):
-        model(np.zeros((480, 480, 3), dtype=np.uint8), verbose=False)
-    print("[OK] Model hot.", flush=True)
-
+    # camera FIRST: the window appears in ~2s; heavy AI models (~45s on CPU)
+    # load inside the worker meanwhile, behind a LOADING banner.
     src = int(args.source) if str(args.source).isdigit() else str(args.source)
     cap = None
     for attempt in range(1, 4):
@@ -485,43 +442,51 @@ def main():
     cap.set(cv2.CAP_PROP_BUFFERSIZE, 1)  # never display stale buffered frames
     print(f"[OK] Camera opened: {args.source}", flush=True)
 
-    today = datetime.now().strftime("%Y-%m-%d")
-    visitors, ok_visitors = set(), set()
-    warn_state = {}  # track_id -> last counted violation (rate-limit tally)
-    streak = defaultdict(lambda: {"tags": "", "n": 0})  # consecutive-frame smoothing
-    seen = defaultdict(int)  # track_id -> consecutive sightings (ghost filter for visitors)
-    tally = {}
-    if "helmet" in CHECKS:
-        tally["no_helmet"] = 0
-    if "vest" in CHECKS:
-        tally["no_vest"] = 0
-    judge_gloves_live = ("gloves" in CHECKS) and (HAS_GLOVES_MAIN or gmodel is not None)
-    if judge_gloves_live:
-        tally["no_gloves"] = 0
-    if HAS_MASK:
-        tally["no_mask"] = 0
-    tally_name = f"ppe_stats_{today}.csv" if TAG == "all" else f"ppe_{TAG}_stats_{today}.csv"
-    tally_path = BASE / "logs" / tally_name
-    print(f"[INFO] profile checks={sorted(CHECKS)} tally={tally_name}", flush=True)
-    if tally_path.exists():  # resume today's counts across restarts
-        for line in tally_path.read_text().splitlines()[1:]:
-            parts = line.split(",")
-            if len(parts) == 2 and parts[0] in tally:
-                tally[parts[0]] = int(parts[1])
-
     # Shared display state: main thread captures + draws at camera rate,
-    # worker thread runs AI behind at ~10 Hz and publishes overlay boxes.
+    # worker thread loads AI models, then runs inference behind at ~5 Hz.
     # items = [(x1, y1, x2, y2, color_bgr, label, thick)]
     shared = {
         "raw": None,
         "items": [],
+        "models_ready": False,
         "hud": {"violations": 0, "persons": 0, "visitors": 0, "ok": 0,
-                "tally": dict(tally), "infer_fps": 0.0, "cam_fps": 0.0},
+                "tally": {}, "infer_fps": 0.0, "cam_fps": 0.0},
         "stop": False,
         "lock": threading.Lock(),
     }
 
     def infer_worker():
+        model, ids, HAS_MASK, HAS_GLOVES_MAIN, gmodel, gids, base = load_models(args, CHECKS)
+        print("[...] Warming up model (3 dummy frames)...", flush=True)
+        for _ in range(3):
+            model(np.zeros((480, 480, 3), dtype=np.uint8), verbose=False)
+        print("[OK] Model hot.", flush=True)
+
+        today = datetime.now().strftime("%Y-%m-%d")
+        visitors, ok_visitors = set(), set()
+        warn_state = {}  # track_id -> last counted violation (rate-limit tally)
+        streak = defaultdict(lambda: {"tags": "", "n": 0})  # consecutive-frame smoothing
+        seen = defaultdict(int)  # track_id -> consecutive sightings (ghost filter for visitors)
+        tally = {}
+        if "helmet" in CHECKS:
+            tally["no_helmet"] = 0
+        if "vest" in CHECKS:
+            tally["no_vest"] = 0
+        judge_gloves_live = ("gloves" in CHECKS) and (HAS_GLOVES_MAIN or gmodel is not None)
+        if judge_gloves_live:
+            tally["no_gloves"] = 0
+        if HAS_MASK:
+            tally["no_mask"] = 0
+        tally_name = f"ppe_stats_{today}.csv" if TAG == "all" else f"ppe_{TAG}_stats_{today}.csv"
+        tally_path = BASE / "logs" / tally_name
+        print(f"[INFO] profile checks={sorted(CHECKS)} tally={tally_name}", flush=True)
+        if tally_path.exists():  # resume today's counts across restarts
+            for line in tally_path.read_text().splitlines()[1:]:
+                parts = line.split(",")
+                if len(parts) == 2 and parts[0] in tally:
+                    tally[parts[0]] = int(parts[1])
+        with shared["lock"]:
+            shared["models_ready"] = True
         tracker_cfg = str(TRACKER_YAML) if TRACKER_YAML.exists() else "bytetrack.yaml"
         last_glove = []  # cached [(box, conf, cls)] from backup model
         last_face = ([], [])  # cached ([(box, conf)], [(box, conf)]) from face-zoom
@@ -758,11 +723,16 @@ def main():
             items = list(shared["items"])
             hud = shared["hud"]
             hud_tally = dict(hud["tally"])
+            ready = shared["models_ready"]
         for (x1, y1, x2, y2, color, label, thick) in items:
             cv2.rectangle(frame, (x1, y1), (x2, y2), color, thick)
             cv2.putText(frame, label, (x1, max(0, y1 - 8)),
                         cv2.FONT_HERSHEY_SIMPLEX, 0.5 if thick == 1 else 0.6,
                         color, 1 if thick == 1 else 2)
+        if not ready:  # models still loading: live video + banner, AI boxes pop in later
+            cv2.rectangle(frame, (8, 88), (330, 118), (0, 140, 255), -1)
+            cv2.putText(frame, "LOADING AI MODELS...", (16, 109),
+                        cv2.FONT_HERSHEY_SIMPLEX, 0.6, (255, 255, 255), 2)
         v = hud["violations"]
         pill_color = (0, 0, 210) if v > 0 else (0, 170, 0)
         cv2.rectangle(frame, (8, 8), (248, 38), pill_color, -1)
