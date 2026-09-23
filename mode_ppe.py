@@ -295,6 +295,14 @@ def run_image_test(args, model, ids, gmodel, gids, checks):
                               r.boxes.conf.cpu().numpy()):
             if not box_passes(c, float(cf), args, ids):
                 continue
+            if c in (ids["HARDHAT"], ids["NO_HARDHAT"]) and "helmet" not in checks:
+                continue
+            if c in (ids["VEST"], ids["NO_VEST"]) and "vest" not in checks:
+                continue
+            if c in (ids["MASK"], ids["NO_MASK"]) and "mask" not in checks:
+                continue
+            if c in (ids["GLOVES"], ids["NO_GLOVES"]) and "gloves" not in checks:
+                continue
             b = [float(v) for v in box]
             draw_ppe_box(frame, b, c, float(cf), model.names)
             if ids["PERSON"] is not None and c == ids["PERSON"]:
@@ -544,6 +552,16 @@ def main():
                                                r.boxes.conf.cpu().numpy(), ids_arr):
                         cf = float(cf)
                         if not box_passes(c, cf, args, ids):
+                            continue
+                        # profile gate: a station only ever SHOWS its own items
+                        # (mg never draws helmet/vest boxes and vice versa)
+                        if c in (ids["HARDHAT"], ids["NO_HARDHAT"]) and "helmet" not in CHECKS:
+                            continue
+                        if c in (ids["VEST"], ids["NO_VEST"]) and "vest" not in CHECKS:
+                            continue
+                        if c in (ids["MASK"], ids["NO_MASK"]) and "mask" not in CHECKS:
+                            continue
+                        if c in (ids["GLOVES"], ids["NO_GLOVES"]) and "gloves" not in CHECKS:
                             continue
                         b = [float(v) for v in box]
                         if ids["PERSON"] is not None and c == ids["PERSON"]:
