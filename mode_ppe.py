@@ -51,6 +51,7 @@ BASE = Path(__file__).parent
 ALARM_WAV = BASE / "alarm.wav"
 TRACKER_YAML = BASE / "tracker_ppe.yaml"  # long-memory ByteTrack (falls back to stock if missing)
 IMG_EXTS = {".jpg", ".jpeg", ".png", ".bmp", ".webp"}
+T0 = time.time()  # process start (the imports above already cost ~10s on CPU-only machines)
 
 
 def expand_person(pbox, top=0.25, side=0.10, bottom=0.05):
@@ -467,7 +468,7 @@ def main():
         print(f"[X] Cannot open source {args.source} - check camera cable / RTSP URL", flush=True)
         return
     cap.set(cv2.CAP_PROP_BUFFERSIZE, 1)  # never display stale buffered frames
-    print(f"[OK] Camera opened: {args.source}", flush=True)
+    print(f"[OK] Camera opened: {args.source} (+{time.time() - T0:.0f}s after click)", flush=True)
 
     # Shared display state: main thread captures + draws at camera rate,
     # worker thread loads AI models, then runs inference behind at ~5 Hz.
@@ -514,6 +515,7 @@ def main():
                     tally[parts[0]] = int(parts[1])
         with shared["lock"]:
             shared["models_ready"] = True
+        print(f"[OK] AI models ready (+{time.time() - T0:.0f}s after click)", flush=True)
         tracker_cfg = str(TRACKER_YAML) if TRACKER_YAML.exists() else "bytetrack.yaml"
         last_glove = []  # cached [(box, conf, cls)] from backup model
         last_face = ([], [])  # cached ([(box, conf)], [(box, conf)]) from face-zoom
@@ -750,6 +752,7 @@ def main():
           f"Press Q to quit.", flush=True)
 
     ct0, ctn, cam_fps = time.time(), 0, 0.0
+    first_frame = True
     while True:
         ok, frame = cap.read()
         if not ok:
@@ -794,6 +797,9 @@ def main():
                 shared["hud"]["cam_fps"] = cam_fps
 
         cv2.imshow(f"PPE_{TAG.upper()} - Q to quit", frame)
+        if first_frame:
+            print(f"[OK] First video frame shown (+{time.time() - T0:.0f}s after click)", flush=True)
+            first_frame = False
         if cv2.waitKey(1) & 0xFF in (ord("q"), ord("Q")):
             shared["stop"] = True
             break
