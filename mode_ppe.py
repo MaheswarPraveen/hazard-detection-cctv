@@ -506,10 +506,11 @@ def main():
         print(f"[X] Cannot open source {args.source} - check camera cable / RTSP URL", flush=True)
         return
     cap.set(cv2.CAP_PROP_BUFFERSIZE, 1)  # never display stale buffered frames
-    # ask for 720p: inference size is fixed, but the face-zoom crop reads the
-    # FULL-RES frame, so more capture pixels = more mask detail at 2m+.
-    cap.set(cv2.CAP_PROP_FRAME_WIDTH, 1280)
-    cap.set(cv2.CAP_PROP_FRAME_HEIGHT, 720)
+    # ask for 1080p, accept whatever the camera grants (720p laptops fine):
+    # inference size is fixed, but the face-zoom crop reads the FULL-RES frame,
+    # so more capture pixels = more mask/glove detail at 2-3 m.
+    cap.set(cv2.CAP_PROP_FRAME_WIDTH, 1920)
+    cap.set(cv2.CAP_PROP_FRAME_HEIGHT, 1080)
     _cw, _ch = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH)), int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
     print(f"[OK] Camera opened: {args.source} ({_cw}x{_ch}) (+{time.time() - T0:.0f}s after click)",
           flush=True)
