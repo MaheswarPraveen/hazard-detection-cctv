@@ -73,8 +73,11 @@ def main():
     GLOVES = _find(["gloves", "glove", "safety gloves"])
     NO_GLOVES = _find(["no-gloves", "no gloves", "no glove", "no-glove"])
     HAS_GLOVES = GLOVES is not None or NO_GLOVES is not None
+    MASK = _find(["mask", "face mask"])
+    NO_MASK = _find(["no-mask", "no mask"])
+    HAS_MASK = MASK is not None or NO_MASK is not None
     print(f"[INFO] Model {wpath.name} classes: {model.names}")
-    print(f"[INFO] Mapped ids — HARDHAT={HARDHAT} NO_HARDHAT={NO_HARDHAT} VEST={VEST} NO_VEST={NO_VEST} PERSON={PERSON} GLOVES={GLOVES} NO_GLOVES={NO_GLOVES} gloves_enabled={HAS_GLOVES}")
+    print(f"[INFO] Mapped ids — HARDHAT={HARDHAT} NO_HARDHAT={NO_HARDHAT} VEST={VEST} NO_VEST={NO_VEST} PERSON={PERSON} GLOVES={GLOVES} NO_GLOVES={NO_GLOVES} MASK={MASK} NO_MASK={NO_MASK}")
 
     print("[...] Warming up model (3 dummy frames)...")
     for _ in range(3):
@@ -97,9 +100,11 @@ def main():
     visitors = set()  # unique track ids seen (people walked through)
     ok_visitors = set()  # ids seen fully compliant at least once
     warn_state = {}  # track_id -> last warned violation (rate-limit console spam)
-    tally = {"no_helmet": 0, "no_vest": 0, "no_gloves": 0}  # violation events today
+    tally = {"no_helmet": 0, "no_vest": 0, "no_gloves": 0, "no_mask": 0}  # violation events today
     if not HAS_GLOVES:
         tally.pop("no_gloves", None)
+    if not HAS_MASK:
+        tally.pop("no_mask", None)
     tally_path = BASE / "logs" / f"ppe_stats_{today}.csv"
     if tally_path.exists():  # resume today's counts across restarts
         for line in tally_path.read_text().splitlines()[1:]:
@@ -118,7 +123,7 @@ def main():
         frame = r.orig_img
         h, w = frame.shape[:2]
 
-        persons, hats, nohats, vests, novests, gloves, nogloves = [], [], [], [], [], [], []
+        persons, hats, nohats, vests, novests, gloves, nogloves, masks, nomasks = [], [], [], [], [], [], [], [], []
         if r.boxes is not None and r.boxes.id is not None:
             ids = r.boxes.id.cpu().numpy().astype(int)
             xyxy = r.boxes.xyxy.cpu().numpy()
@@ -138,6 +143,10 @@ def main():
                     gloves.append(box)
                 elif NO_GLOVES is not None and c == NO_GLOVES:
                     nogloves.append(box)
+                elif MASK is not None and c == MASK:
+                    masks.append(box)
+                elif NO_MASK is not None and c == NO_MASK:
+                    nomasks.append(box)
 
         violations = 0
         for pbox, tid in persons:
@@ -148,9 +157,12 @@ def main():
             flag_novest = any(center_in(vb, pbox) for vb in novests)
             has_gloves = any(center_in(gb, pbox) for gb in gloves) if HAS_GLOVES else True
             flag_nogloves = any(center_in(gb, pbox) for gb in nogloves) if HAS_GLOVES else False
+            has_mask = any(center_in(mb, pbox) for mb in masks) if HAS_MASK else True
+            flag_nomask = any(center_in(mb, pbox) for mb in nomasks) if HAS_MASK else False
             bad_helmet = (not has_hat) or flag_nohat
             bad_vest = (not has_vest) or flag_novest
             bad_gloves = ((not has_gloves) or flag_nogloves) if HAS_GLOVES else False
+            bad_mask = ((not has_mask) or flag_nomask) if HAS_MASK else False
             tags = []
             if bad_helmet:
                 tags.append("NO HELMET")
@@ -158,6 +170,8 @@ def main():
                 tags.append("NO VEST")
             if bad_gloves:
                 tags.append("NO GLOVES")
+            if bad_mask:
+                tags.append("NO MASK")
             ok = not tags
             color = (0, 255, 0) if ok else (0, 0, 255)
             cv2.rectangle(frame, (x1, y1), (x2, y2), color, 2)
@@ -175,6 +189,8 @@ def main():
                         tally["no_vest"] += 1
                     if HAS_GLOVES and bad_gloves:
                         tally["no_gloves"] += 1
+                    if HAS_MASK and bad_mask:
+                        tally["no_mask"] += 1
                     save_tally(tally_path, visitors, ok_visitors, tally)
                     print(f"[WARNING] ID:{tid} {vtype}")
             else:
@@ -196,7 +212,8 @@ def main():
         cv2.putText(frame, f"{len(persons)} in view | {len(visitors)} visitors | {fps:.0f} FPS",
                     (10, 54), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (230, 230, 230), 1)
         gloves_txt = f" | No gloves: {tally.get('no_gloves', 0)}" if HAS_GLOVES else ""
-        cv2.putText(frame, f"No helmet: {tally['no_helmet']} | No vest: {tally['no_vest']}{gloves_txt} | OK: {len(ok_visitors)}",
+        mask_txt = f" | No mask: {tally.get('no_mask', 0)}" if HAS_MASK else ""
+        cv2.putText(frame, f"No helmet: {tally['no_helmet']} | No vest: {tally['no_vest']}{gloves_txt}{mask_txt} | OK: {len(ok_visitors)}",
                     (10, 70), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 255, 255), 1)
         if violations > 0:
             if winsound is not None and ALARM_WAV.exists():
@@ -221,8 +238,9 @@ def main():
     cv2.destroyAllWindows()
     save_tally(tally_path, visitors, ok_visitors, tally)
     gloves_s = f" no_gloves={tally.get('no_gloves', 0)}" if HAS_GLOVES else ""
+    mask_s = f" no_mask={tally.get('no_mask', 0)}" if HAS_MASK else ""
     print(f"[OK] PPE session ended | visitors={len(visitors)} ok={len(ok_visitors)} "
-          f"no_helmet={tally['no_helmet']} no_vest={tally['no_vest']}{gloves_s}")
+          f"no_helmet={tally['no_helmet']} no_vest={tally['no_vest']}{gloves_s}{mask_s}")
 
 
 if __name__ == "__main__":
