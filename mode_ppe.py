@@ -476,10 +476,10 @@ def main():
 
     # Shared display state: main thread captures + draws at camera rate,
     # worker thread loads AI models, then runs inference behind at ~5 Hz.
-    # items = [(x1, y1, x2, y2, color_bgr, label, thick)]
+    # The live screen shows NO boxes - just a side status board (OK / NO xxx).
     shared = {
         "raw": None,
-        "items": [],
+        "panel": [],  # [(label, state)] state in ok/bad/idle, profile order
         "models_ready": False,
         "hud": {"violations": 0, "persons": 0, "visitors": 0, "ok": 0,
                 "tally": {}, "infer_fps": 0.0, "cam_fps": 0.0},
@@ -573,9 +573,10 @@ def main():
                     time.sleep(0.05)
                     continue
 
-                items = []
                 persons, hats, nohats, vests, novests = [], [], [], [], []
                 gloves, nogloves, masks, nomasks = [], [], [], []
+                # NOTE: no overlay boxes are drawn live - the screen shows only
+                # the side status board. PPE lists below feed judging only.
                 if r.boxes is not None and len(r.boxes) > 0:
                     has_ids = r.boxes.id is not None
                     ids_arr = r.boxes.id.cpu().numpy().astype(int) if has_ids else \
@@ -600,9 +601,6 @@ def main():
                         if ids["PERSON"] is not None and c == ids["PERSON"]:
                             persons.append((b, int(tid), cf))
                         else:
-                            items.append((int(b[0]), int(b[1]), int(b[2]), int(b[3]),
-                                          BOX_COLORS.get(c, (255, 255, 0)),
-                                          f"{model.names[c]} {cf:.2f}", 1))
                             if ids["HARDHAT"] is not None and c == ids["HARDHAT"]:
                                 hats.append(b)
                             elif ids["NO_HARDHAT"] is not None and c == ids["NO_HARDHAT"]:
@@ -642,8 +640,6 @@ def main():
                 if gmodel is not None:
                     for (b, cf, c) in last_glove:
                         (gloves if c == gids.get("GLOVES") else nogloves).append(b)
-                        items.append((int(b[0]), int(b[1]), int(b[2]), int(b[3]), (255, 0, 0),
-                                      f"{gmodel.names[c]} {cf:.2f} (glove-m)", 1))
 
                 # face-zoom second look for tiny masks (the 2m+ fix)
                 if args.face_zoom and not args.ignore_mask and persons \
@@ -655,12 +651,8 @@ def main():
                 if args.face_zoom and not args.ignore_mask:
                     for (b, cf) in last_face[0]:
                         masks.append(b)
-                        items.append((int(b[0]), int(b[1]), int(b[2]), int(b[3]), (0, 255, 255),
-                                      f"{mask_name} {cf:.2f} (zoom)", 1))
                     for (b, cf) in last_face[1]:
                         nomasks.append(b)
-                        items.append((int(b[0]), int(b[1]), int(b[2]), int(b[3]), (0, 255, 255),
-                                      f"{nomask_name} {cf:.2f} (zoom)", 1))
 
                 # dedup: same object detected twice (seen live: double NO-Mask
                 # boxes flickering with alternating track IDs)
@@ -681,6 +673,7 @@ def main():
                 nomasks = dedup_by_iou(nomasks)
 
                 violations = 0
+                all_bad = set()  # confirmed violation tags across everyone in view
                 for pbox, tid, pconf in persons:
                     ph = pbox[3] - pbox[1]
                     judge_mask = HAS_MASK and ph >= args.min_face_h
@@ -697,19 +690,11 @@ def main():
                     st["n"] = st["n"] + 1 if st["tags"] == raw_key else 1
                     st["tags"] = raw_key
                     confirmed = raw_tags if st["n"] >= args.smooth else []
+                    if confirmed:
+                        all_bad.update(confirmed)
                     far_note = "FAR" if (HAS_MASK and ph < args.min_face_h) else ""
-                    x1, y1, x2, y2 = map(int, pbox)
                     if confirmed:
                         violations += 1
-                        color = (0, 0, 255)
-                        label = "WARNING " + "+".join(confirmed)
-                    elif raw_tags:
-                        color = (0, 255, 255)  # amber = verifying, not yet counted
-                        label = f"VERIFYING {st['n']}/{args.smooth} " + "+".join(raw_tags)
-                    else:
-                        color = (0, 255, 0)
-                        label = "OK" + (f" {far_note}" if far_note else "")
-                    items.append((x1, y1, x2, y2, color, label, 2))
                     seen[int(tid)] += 1
                     if len(seen) > 2000:
                         seen.clear()
@@ -734,6 +719,21 @@ def main():
                             ok_visitors.add(int(tid))
                             warn_state.pop(int(tid), None)
 
+                # side status board: overall state per checked item (profile order)
+                panel = []
+                for _key, _label, _bad in (("no_helmet", "HELMET", "NO HELMET"),
+                                           ("no_vest", "VEST", "NO VEST"),
+                                           ("no_mask", "MASK", "NO MASK"),
+                                           ("no_gloves", "GLOVES", "NO GLOVES")):
+                    if _key not in tally:
+                        continue
+                    if not persons:
+                        panel.append((_label, "idle"))
+                    elif _bad in all_bad:
+                        panel.append((_label, "bad"))
+                    else:
+                        panel.append((_label, "ok"))
+
                 now = time.time()
                 itn += 1
                 if now - it0 >= 1.0:
@@ -741,7 +741,7 @@ def main():
                     itn, it0 = 0, now
                 if now - perf_t0 >= 10.0:
                     print(f"[PERF] infer {infer_fps:.1f}Hz persons={len(persons)} "
-                          f"items={len(items)} visitors={len(visitors)}", flush=True)
+                          f"panel={[(l, s) for l, s in panel]} visitors={len(visitors)}", flush=True)
                     # auto-throttle: extras (zoom/gloves) back off when the CPU can't
                     # keep up, recover when it can. Hysteresis via 10s windows.
                     if ema_dt > 0.40 and not throttled:
@@ -771,7 +771,7 @@ def main():
 
                 with shared["lock"]:
                     cam = shared["hud"]["cam_fps"]
-                    shared["items"] = items
+                    shared["panel"] = panel
                     shared["hud"] = {"violations": violations, "persons": len(persons),
                                      "visitors": len(visitors), "ok": len(ok_visitors),
                                      "tally": dict(tally), "infer_fps": infer_fps, "cam_fps": cam}
@@ -803,15 +803,26 @@ def main():
             continue
         with shared["lock"]:
             shared["raw"] = frame
-            items = list(shared["items"])
+            panel = list(shared["panel"])
             hud = shared["hud"]
             hud_tally = dict(hud["tally"])
             ready = shared["models_ready"]
-        for (x1, y1, x2, y2, color, label, thick) in items:
-            cv2.rectangle(frame, (x1, y1), (x2, y2), color, thick)
-            cv2.putText(frame, label, (x1, max(0, y1 - 8)),
-                        cv2.FONT_HERSHEY_SIMPLEX, 0.5 if thick == 1 else 0.6,
-                        color, 1 if thick == 1 else 2)
+        # side status board (right): MASK: OK / MASK: NO MASK, etc. No boxes.
+        fh, fw = frame.shape[:2]
+        bw, bh = 215, 34 + 30 * max(1, len(panel))
+        bx0, by0 = fw - bw - 10, 90
+        cv2.rectangle(frame, (bx0, by0), (fw - 10, by0 + bh), (25, 25, 25), -1)
+        cv2.putText(frame, "PPE STATUS", (bx0 + 10, by0 + 24),
+                    cv2.FONT_HERSHEY_SIMPLEX, 0.55, (255, 255, 255), 2)
+        for i, (plabel, state) in enumerate(panel):
+            if state == "ok":
+                ptxt, pcol = f"{plabel}: OK", (0, 210, 0)
+            elif state == "bad":
+                ptxt, pcol = f"{plabel}: NO {plabel}", (0, 0, 255)
+            else:
+                ptxt, pcol = f"{plabel}: --", (150, 150, 150)
+            cv2.putText(frame, ptxt, (bx0 + 10, by0 + 54 + i * 30),
+                        cv2.FONT_HERSHEY_SIMPLEX, 0.6, pcol, 2)
         if not ready:  # models still loading: live video + banner, AI boxes pop in later
             cv2.rectangle(frame, (8, 88), (330, 118), (0, 140, 255), -1)
             cv2.putText(frame, "LOADING AI MODELS...", (16, 109),
