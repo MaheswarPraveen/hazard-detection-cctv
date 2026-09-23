@@ -824,7 +824,7 @@ def main():
             cv2.putText(frame, ptxt, (bx0 + 10, by0 + 54 + i * 30),
                         cv2.FONT_HERSHEY_SIMPLEX, 0.6, pcol, 2)
         if not ready:  # models still loading: live video + banner, AI boxes pop in later
-            cv2.rectangle(frame, (8, 88), (330, 118), (0, 140, 255), -1)
+            cv2.rectangle(frame, (8, 88), (330, 118), (25, 25, 25), -1)
             cv2.putText(frame, "LOADING AI MODELS...", (16, 109),
                         cv2.FONT_HERSHEY_SIMPLEX, 0.6, (255, 255, 255), 2)
         v = hud["violations"]
@@ -833,14 +833,20 @@ def main():
         cv2.circle(frame, (26, 23), 6, (255, 255, 255), -1)
         cv2.putText(frame, "WARNING" if v > 0 else "ALL COMPLIANT", (40, 28),
                     cv2.FONT_HERSHEY_SIMPLEX, 0.6, (255, 255, 255), 2)
-        cv2.putText(frame, f"{hud['persons']} in view | {hud['visitors']} visitors | "
-                           f"AI {hud['infer_fps']:.0f} + CAM {cam_fps:.0f} FPS",
-                    (10, 54), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (230, 230, 230), 1)
+        line2 = (f"{hud['persons']} in view | {hud['visitors']} visitors | "
+                 f"AI {hud['infer_fps']:.0f} + CAM {cam_fps:.0f} FPS")
+        (tw2, th2), _ = cv2.getTextSize(line2, cv2.FONT_HERSHEY_SIMPLEX, 0.5, 1)
+        cv2.rectangle(frame, (6, 54 - th2 - 8), (14 + tw2, 58), (25, 25, 25), -1)
+        cv2.putText(frame, line2, (10, 54),
+                    cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 255, 255), 1)
         names = {"no_helmet": "No helmet", "no_vest": "No vest",
                  "no_gloves": "No gloves", "no_mask": "No mask"}
-        cv2.putText(frame, " | ".join(f"{names[k]}: {hud_tally[k]}" for k in hud_tally)
-                           + f" | OK: {hud['ok']}",
-                    (10, 70), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 255, 255), 1)
+        line3 = (" | ".join(f"{names[k]}: {hud_tally[k]}" for k in hud_tally)
+                 + f" | OK: {hud['ok']}")
+        (tw3, th3), _ = cv2.getTextSize(line3, cv2.FONT_HERSHEY_SIMPLEX, 0.5, 1)
+        cv2.rectangle(frame, (6, 70 - th3 - 8), (14 + tw3, 74), (25, 25, 25), -1)
+        cv2.putText(frame, line3, (10, 70),
+                    cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 255, 255), 1)
 
         now2 = time.time()
         ctn += 1
