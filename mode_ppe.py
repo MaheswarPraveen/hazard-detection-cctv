@@ -135,9 +135,11 @@ def draw_ppe_box(frame, box, cls_idx, conf_val, names):
 
 
 def judge_person(pbox, hats, nohats, vests, novests, gloves, nogloves,
-                 masks, nomasks, judge_mask, judge_gloves):
+                 masks, nomasks, judge_mask, judge_gloves, glove_absence_counts=True):
     """Return (tags, detail). Absence alone only counts when close + persistent
-    (persistence is handled by the caller streak); explicit NO-* always counts."""
+    (persistence is handled by the caller streak); explicit NO-* always counts.
+    glove_absence_counts=False when gloves come only from the backup model
+    (its recall is poor, so absence means 'can't tell', not 'no gloves')."""
     has_hat = any(associated(b, pbox) for b in hats)
     flag_nohat = any(associated(b, pbox) for b in nohats)
     has_vest = any(associated(b, pbox) for b in vests)
@@ -151,7 +153,7 @@ def judge_person(pbox, hats, nohats, vests, novests, gloves, nogloves,
         tags.append("NO HELMET")
     if flag_novest or not has_vest:
         tags.append("NO VEST")
-    if judge_gloves and (flag_nogloves or not has_gloves):
+    if judge_gloves and (flag_nogloves or ((not has_gloves) and glove_absence_counts)):
         tags.append("NO GLOVES")
     if judge_mask and (flag_nomask or not has_mask):
         tags.append("NO MASK")
@@ -221,7 +223,8 @@ def run_image_test(args, model, ids, gmodel, gids):
         judge_gloves = not args.ignore_gloves and (gmodel is not None or ids["GLOVES"] is not None) \
             and ph >= args.min_glove_h
         tags, _ = judge_person(pbox, hats, nohats, vests, novests, gloves, nogloves,
-                               masks, nomasks, judge_mask, judge_gloves)
+                               masks, nomasks, judge_mask, judge_gloves,
+                               glove_absence_counts=(ids["GLOVES"] is not None))
         x1, y1, x2, y2 = map(int, pbox)
         color = (0, 255, 0) if not tags else (0, 0, 255)
         cv2.rectangle(frame, (x1, y1), (x2, y2), color, 2)
@@ -409,12 +412,14 @@ def main():
                 cv2.rectangle(frame, (x1, y1), (x2, y2), (255, 0, 0), 1)
 
         violations = 0
+        glove_absence_live = HAS_GLOVES_MAIN  # backup-only gloves: explicit NO-Gloves only
         for pbox, tid, pconf in persons:
             ph = pbox[3] - pbox[1]
             judge_mask = HAS_MASK and ph >= args.min_face_h
             judge_glove = judge_gloves_live and ph >= args.min_glove_h
             raw_tags, _ = judge_person(pbox, hats, nohats, vests, novests, gloves, nogloves,
-                                       masks, nomasks, judge_mask, judge_glove)
+                                       masks, nomasks, judge_mask, judge_glove,
+                                       glove_absence_counts=glove_absence_live)
             raw_key = "+".join(raw_tags)
             st = streak[int(tid)]
             st["n"] = st["n"] + 1 if st["tags"] == raw_key else 1
