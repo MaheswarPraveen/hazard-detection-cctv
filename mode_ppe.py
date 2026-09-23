@@ -549,6 +549,9 @@ def main():
         glove_absence = HAS_GLOVES_MAIN  # backup-only gloves: explicit NO-Gloves only
         mask_name = model.names[ids["MASK"]] if ids["MASK"] is not None else "Mask"
         nomask_name = model.names[ids["NO_MASK"]] if ids["NO_MASK"] is not None else "NO-Mask"
+        # auto-throttle: weak CPUs stay responsive by spacing out the extras
+        face_every_cur, glove_every_cur = args.face_every, args.glove_every
+        ema_dt, throttle_t0, throttled = 0.15, time.time(), False
         try:
             while not shared["stop"]:
                 with shared["lock"]:
@@ -557,6 +560,7 @@ def main():
                     time.sleep(0.02)
                     continue
                 frame_n += 1
+                inf_t0 = time.time()
                 try:
                     r = model.track(grab, persist=True, imgsz=args.imgsz, conf=base,
                                     verbose=False, tracker=tracker_cfg)[0]
@@ -614,7 +618,7 @@ def main():
 
                 # gloves-only backup (its person/helmet outputs are ignored -
                 # that weight is blind there). Gated on persons present.
-                if gmodel is not None and persons and frame_n % args.glove_every == 0:
+                if gmodel is not None and persons and frame_n % glove_every_cur == 0:
                     try:
                         rg = gmodel(grab, conf=args.glove_conf, imgsz=args.glove_imgsz,
                                     verbose=False)[0]
@@ -639,7 +643,7 @@ def main():
 
                 # face-zoom second look for tiny masks (the 2m+ fix)
                 if args.face_zoom and not args.ignore_mask and persons \
-                        and frame_n % args.face_every == 0:
+                        and frame_n % face_every_cur == 0:
                     try:
                         last_face = face_zoom_boxes(grab, persons, model, ids, args)
                     except Exception as e:
@@ -734,6 +738,17 @@ def main():
                 if now - perf_t0 >= 10.0:
                     print(f"[PERF] infer {infer_fps:.1f}Hz persons={len(persons)} "
                           f"items={len(items)} visitors={len(visitors)}", flush=True)
+                    # auto-throttle: extras (zoom/gloves) back off when the CPU can't
+                    # keep up, recover when it can. Hysteresis via 10s windows.
+                    if ema_dt > 0.40 and not throttled:
+                        face_every_cur, glove_every_cur = args.face_every * 2, args.glove_every * 2
+                        throttled = True
+                        print(f"[PERF] CPU struggling ({ema_dt * 1000:.0f}ms/inf) -> "
+                              f"zoom every {face_every_cur}, gloves every {glove_every_cur}", flush=True)
+                    elif ema_dt < 0.20 and throttled:
+                        face_every_cur, glove_every_cur = args.face_every, args.glove_every
+                        throttled = False
+                        print("[PERF] CPU recovered -> full extras rate", flush=True)
                     perf_t0 = now
 
                 if violations > 0:
@@ -756,6 +771,7 @@ def main():
                     shared["hud"] = {"violations": violations, "persons": len(persons),
                                      "visitors": len(visitors), "ok": len(ok_visitors),
                                      "tally": dict(tally), "infer_fps": infer_fps, "cam_fps": cam}
+                ema_dt = 0.9 * ema_dt + 0.1 * (time.time() - inf_t0)
         except Exception:
             traceback.print_exc()
             shared["stop"] = True
