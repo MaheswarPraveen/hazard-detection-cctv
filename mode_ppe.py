@@ -508,7 +508,7 @@ def main():
             tally["no_helmet"] = 0
         if "vest" in CHECKS:
             tally["no_vest"] = 0
-        judge_gloves_live = ("gloves" in CHECKS) and (HAS_GLOVES_MAIN or gmodel is not None)
+        judge_gloves_live = ("gloves" in CHECKS) and (HAS_GLOVES_MAIN or want_gloves)
         if judge_gloves_live:
             tally["no_gloves"] = 0
         if HAS_MASK:
@@ -523,7 +523,22 @@ def main():
                     tally[parts[0]] = int(parts[1])
         with shared["lock"]:
             shared["models_ready"] = True
-        print(f"[OK] AI models ready (+{time.time() - T0:.0f}s after click)", flush=True)
+        print(f"[OK] masks live (+{time.time() - T0:.0f}s after click)", flush=True)
+        if want_gloves and not HAS_GLOVES_MAIN:
+            # slow 49MB backup loads now, in background: masks already judging.
+            try:
+                print("[...] loading gloves backup in background (masks already live)...", flush=True)
+                _gpath = BASE / _gm_arg if not Path(_gm_arg).exists() else Path(_gm_arg)
+                gmodel = YOLO(str(_gpath))
+                gids = resolve_ids(gmodel)
+                if gids["GLOVES"] is None and gids["NO_GLOVES"] is None:
+                    print("[!] gloves backup has no glove classes - gloves stay off", flush=True)
+                    gmodel = None
+                else:
+                    print(f"[OK] gloves backup live (+{time.time() - T0:.0f}s after click)", flush=True)
+            except Exception as e:
+                print(f"[!] gloves backup failed: {e}", flush=True)
+                gmodel = None
         tracker_cfg = str(TRACKER_YAML) if TRACKER_YAML.exists() else "bytetrack.yaml"
         last_glove = []  # cached [(box, conf, cls)] from backup model
         last_face = ([], [])  # cached ([(box, conf)], [(box, conf)]) from face-zoom
@@ -756,7 +771,7 @@ def main():
 
     worker = threading.Thread(target=infer_worker, daemon=True)
     worker.start()
-    print(f"[OK] PPE_Check running on {args.source} | video=full camera rate, AI overlay ~10 Hz. "
+    print(f"[OK] PPE_Check running on {args.source} | video=full camera rate, AI overlay ~5 Hz. "
           f"Press Q to quit.", flush=True)
 
     ct0, ctn, cam_fps = time.time(), 0, 0.0
