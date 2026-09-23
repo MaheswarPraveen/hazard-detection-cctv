@@ -58,6 +58,25 @@ def expand_person(pbox, top=0.25, side=0.10, bottom=0.05):
     return (x1 - pw * side, y1 - ph * top, x2 + pw * side, y2 + ph * bottom)
 
 
+def _iou(a, b):
+    ix1, iy1 = max(a[0], b[0]), max(a[1], b[1])
+    ix2, iy2 = min(a[2], b[2]), min(a[3], b[3])
+    inter = max(0.0, ix2 - ix1) * max(0.0, iy2 - iy1)
+    aa = max(1.0, (a[2] - a[0]) * (a[3] - a[1]))
+    bb = max(1.0, (b[2] - b[0]) * (b[3] - b[1]))
+    return inter / (aa + bb - inter)
+
+
+def dedup_by_iou(boxes, thr=0.6):
+    """Drop near-duplicate boxes (same object detected twice - seen live with
+    flickering double NO-Mask boxes), keep the largest."""
+    kept = []
+    for b in sorted(boxes, key=lambda b: (b[2] - b[0]) * (b[3] - b[1]), reverse=True):
+        if all(_iou(b, k) < thr for k in kept):
+            kept.append(b)
+    return kept
+
+
 def associated(ppe_box, pbox):
     """Is a PPE box worn by this person? Center-in-expanded OR big overlap."""
     ex1, ey1, ex2, ey2 = expand_person(pbox)
@@ -419,6 +438,7 @@ def main():
     visitors, ok_visitors = set(), set()
     warn_state = {}  # track_id -> last counted violation (rate-limit tally)
     streak = defaultdict(lambda: {"tags": "", "n": 0})  # consecutive-frame smoothing
+    seen = defaultdict(int)  # track_id -> consecutive sightings (ghost filter for visitors)
     tally = {}
     if "helmet" in CHECKS:
         tally["no_helmet"] = 0
@@ -554,6 +574,24 @@ def main():
                         items.append((int(b[0]), int(b[1]), int(b[2]), int(b[3]), (0, 255, 255),
                                       f"{nomask_name} {cf:.2f} (zoom)", 1))
 
+                # dedup: same object detected twice (seen live: double NO-Mask
+                # boxes flickering with alternating track IDs)
+                _kept_p, _kept_b = [], []
+                for (b, tid, cf) in sorted(persons, key=lambda t: (t[0][2] - t[0][0]) * (t[0][3] - t[0][1]),
+                                           reverse=True):
+                    if all(_iou(b, k) < 0.5 for k in _kept_b):
+                        _kept_b.append(b)
+                        _kept_p.append((b, tid, cf))
+                persons = _kept_p
+                hats = dedup_by_iou(hats)
+                nohats = dedup_by_iou(nohats)
+                vests = dedup_by_iou(vests)
+                novests = dedup_by_iou(novests)
+                gloves = dedup_by_iou(gloves)
+                nogloves = dedup_by_iou(nogloves)
+                masks = dedup_by_iou(masks)
+                nomasks = dedup_by_iou(nomasks)
+
                 violations = 0
                 for pbox, tid, pconf in persons:
                     ph = pbox[3] - pbox[1]
@@ -584,7 +622,10 @@ def main():
                         color = (0, 255, 0)
                         label = "OK" + (f" {far_note}" if far_note else "")
                     items.append((x1, y1, x2, y2, color, label, 2))
-                    if int(tid) >= 0:
+                    seen[int(tid)] += 1
+                    if len(seen) > 2000:
+                        seen.clear()
+                    if int(tid) >= 0 and seen[int(tid)] >= 2:  # stable track only, no 1-frame ghosts
                         visitors.add(int(tid))
                     if confirmed:
                         vtype = "+".join(confirmed)
