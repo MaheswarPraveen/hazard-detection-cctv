@@ -31,6 +31,7 @@ photos (see bottom of this file). Same story for blue gloves (Phase 2).
 """
 import argparse
 import os
+import subprocess
 import threading
 import time
 import traceback
@@ -52,6 +53,16 @@ ALARM_WAV = BASE / "alarm.wav"
 TRACKER_YAML = BASE / "tracker_ppe.yaml"  # long-memory ByteTrack (falls back to stock if missing)
 IMG_EXTS = {".jpg", ".jpeg", ".png", ".bmp", ".webp"}
 T0 = time.time()  # process start (the imports above already cost ~10s on CPU-only machines)
+
+
+def pid_alive(pid):
+    """tasklist-based PID check (os.kill probing lies on Win10 Home)."""
+    try:
+        out = subprocess.run(["tasklist", "/FI", f"PID eq {pid}", "/FO", "CSV", "/NH"],
+                             capture_output=True, text=True, timeout=15).stdout
+        return f'"{pid}"' in out
+    except Exception:
+        return False
 
 
 def expand_person(pbox, top=0.25, side=0.10, bottom=0.05):
@@ -445,14 +456,7 @@ def main():
             _old = int(lock_path.read_text().strip())
         except ValueError:
             _old = None
-        _alive = False
-        if _old and _old != os.getpid():
-            try:
-                os.kill(_old, 0)
-                _alive = True
-            except OSError:
-                _alive = False
-        if _alive:
+        if _old and _old != os.getpid() and pid_alive(_old):
             print(f"[!] Another PPE_{TAG} (pid {_old}) already holds the camera - exiting.", flush=True)
             return
     lock_path.write_text(str(os.getpid()))

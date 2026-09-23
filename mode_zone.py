@@ -6,6 +6,7 @@ import argparse
 import csv
 import math
 import os
+import subprocess
 import time
 from datetime import datetime
 from pathlib import Path
@@ -83,9 +84,10 @@ def main():
         _zalive = False
         if _zold and _zold != os.getpid():
             try:
-                os.kill(_zold, 0)
-                _zalive = True
-            except OSError:
+                _zout = subprocess.run(["tasklist", "/FI", f"PID eq {_zold}", "/FO", "CSV", "/NH"],
+                                       capture_output=True, text=True, timeout=15).stdout
+                _zalive = f'"{_zold}"' in _zout
+            except Exception:
                 _zalive = False
         if _zalive:
             print(f"[!] Another Zone_Alert (pid {_zold}) already holds the camera - exiting.")
