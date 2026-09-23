@@ -32,6 +32,17 @@ CAM_MODES = ("zone", "ppe_mh", "ppe_vg")  # share one camera: only one runs at a
 LOCK_OF = {"zone": "zone.lock", "ppe_mh": "ppe_mh.lock", "ppe_vg": "ppe_vg.lock"}
 
 
+def pid_alive(pid):
+    """Is this PID running? (os.kill probing is unreliable on Win10 Home -
+    tasklist is the ground truth here.)"""
+    try:
+        out = subprocess.run(["tasklist", "/FI", f"PID eq {pid}", "/FO", "CSV", "/NH"],
+                             capture_output=True, text=True, timeout=15).stdout
+        return f'"{pid}"' in out
+    except Exception:
+        return False
+
+
 def kill_lock_owner(lock_name):
     """Terminate a stray station process left behind by an older dashboard
     (its lock file holds the PID). Returns True if something was killed."""
@@ -42,25 +53,31 @@ def kill_lock_owner(lock_name):
         return False
     if pid == os.getpid():
         return False
-    try:
-        os.kill(pid, 0)  # alive?
-    except OSError:
+    if not pid_alive(pid):  # stale lock, owner already gone
         try:
             lock.unlink()
         except OSError:
             pass
         return False
-    try:
-        os.kill(pid, signal.SIGTERM)
-    except OSError:
-        return False
+    subprocess.run(["taskkill", "/F", "/PID", str(pid)], capture_output=True, timeout=15)
     for _ in range(50):  # wait up to 5s for release
-        try:
-            os.kill(pid, 0)
-            time.sleep(0.1)
-        except OSError:
+        if not pid_alive(pid):
             break
+        time.sleep(0.1)
     return True
+
+
+def reap_all_cameras():
+    """Terminate owners of ANY station lock - all profiles share one camera,
+    so a stale lock from a retired profile must also free the camera."""
+    killed = []
+    for lock in sorted(BASE.glob("*.lock")):
+        try:
+            if kill_lock_owner(lock.name):
+                killed.append(lock.name)
+        except OSError:
+            pass
+    return killed
 
 PAGE = """<!doctype html><html><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
@@ -246,7 +263,7 @@ class Handler(SimpleHTTPRequestHandler):
                     p = procs.get(other)
                     if p is not None and p.poll() is None:
                         p.terminate()
-            kill_lock_owner(LOCK_OF[mode])  # plus any orphan the dashboard forgot
+            reap_all_cameras()  # plus any orphan (even retired profiles) holding the camera
             log = open(BASE / f"{mode}_dash.log", "ab")
             flags = 0
             if sys.platform == "win32":
@@ -268,8 +285,7 @@ class Handler(SimpleHTTPRequestHandler):
 
 
 if __name__ == "__main__":
-    for _m in CAM_MODES:  # clean up strays from a previous dashboard run
-        kill_lock_owner(LOCK_OF[_m])
+    reap_all_cameras()  # clean up strays from a previous dashboard run
     handler = partial(Handler, directory=str(BASE))
     srv = ThreadingHTTPServer(("127.0.0.1", PORT), handler)
     print(f"[OK] Dashboard at http://localhost:{PORT}")
