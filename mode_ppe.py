@@ -305,6 +305,8 @@ def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--source", default="0", help="0 webcam / RTSP URL / image.jpg for single-photo test")
     ap.add_argument("--model", default="ppe_v8n.pt", help="primary PPE weights (nano, CPU-friendly)")
+    ap.add_argument("--checks", default="all",
+                    help="comma list from helmet,vest,mask,gloves (e.g. 'helmet,vest' or 'mask,gloves'); 'all' checks everything")
     ap.add_argument("--gloves-model", default="", help="optional 2nd weights for gloves only, e.g. ppe_v8m.pt")
     ap.add_argument("--camera", default="CAM01")
     ap.add_argument("--imgsz", type=int, default=480, help="main pass size (480 = sweet spot: big items stay accurate, ~35%% faster than 640)")
