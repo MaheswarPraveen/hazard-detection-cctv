@@ -271,13 +271,19 @@ def run_image_test(args, model, ids, gmodel, gids):
         print("[TEST] NO Person box kept -> try --person-conf 0.25 --imgsz 640, move to 2m, center chest-up.")
     for i, (pbox, pconf) in enumerate(persons):
         ph = pbox[3] - pbox[1]
-        judge_mask = not args.ignore_mask and (ids["MASK"] is not None or ids["NO_MASK"] is not None) \
+        judge_mask = not args.ignore_mask and "mask" in CHECKS \
+            and (ids["MASK"] is not None or ids["NO_MASK"] is not None) \
             and ph >= args.min_face_h
-        judge_gloves = not args.ignore_gloves and (gmodel is not None or ids["GLOVES"] is not None) \
+        judge_gloves = not args.ignore_gloves and "gloves" in CHECKS \
+            and (gmodel is not None or ids["GLOVES"] is not None) \
             and ph >= args.min_glove_h
         tags, _ = judge_person(pbox, hats, nohats, vests, novests, gloves, nogloves,
                                masks, nomasks, judge_mask, judge_gloves,
                                glove_absence_counts=(ids["GLOVES"] is not None))
+        if "helmet" not in CHECKS:
+            tags = [t for t in tags if t != "NO HELMET"]
+        if "vest" not in CHECKS:
+            tags = [t for t in tags if t != "NO VEST"]
         x1, y1, x2, y2 = map(int, pbox)
         color = (0, 255, 0) if not tags else (0, 0, 255)
         cv2.rectangle(frame, (x1, y1), (x2, y2), color, 2)
@@ -328,14 +334,27 @@ def main():
     ap.add_argument("--face-imgsz", type=int, default=256, help="inference size for the face crop")
     args = ap.parse_args()
 
+    # ---- check profile: split stations (helmet+vest) vs (mask+gloves) ----
+    CHECKS = set(x.strip().lower() for x in str(args.checks).split(",") if x.strip())
+    if "all" in CHECKS:
+        CHECKS = {"helmet", "vest", "mask", "gloves"}
+    unknown = CHECKS - {"helmet", "vest", "mask", "gloves"}
+    if unknown or not CHECKS:
+        print(f"[X] --checks must be 'all' or a comma list from helmet,vest,mask,gloves (got: {args.checks})")
+        return
+    CHECK_HV = CHECKS == {"helmet", "vest"}
+    CHECK_MG = CHECKS == {"mask", "gloves"}
+    TAG = "hv" if CHECK_HV else "mg" if CHECK_MG else "all" if len(CHECKS) == 4 else "custom"
+
     wpath = BASE / args.model if not Path(args.model).exists() else Path(args.model)
     model = YOLO(str(wpath))
     ids = resolve_ids(model)
-    HAS_MASK = (ids["MASK"] is not None or ids["NO_MASK"] is not None) and not args.ignore_mask
+    HAS_MASK = (ids["MASK"] is not None or ids["NO_MASK"] is not None) and not args.ignore_mask \
+        and "mask" in CHECKS
     HAS_GLOVES_MAIN = (ids["GLOVES"] is not None or ids["NO_GLOVES"] is not None) and not args.ignore_gloves
 
     gmodel, gids = None, {}
-    if args.gloves_model and not args.ignore_gloves:
+    if args.gloves_model and not args.ignore_gloves and "gloves" in CHECKS:
         gpath = BASE / args.gloves_model if not Path(args.gloves_model).exists() else Path(args.gloves_model)
         if gpath.exists():
             gmodel = YOLO(str(gpath))
@@ -396,13 +415,19 @@ def main():
     visitors, ok_visitors = set(), set()
     warn_state = {}  # track_id -> last counted violation (rate-limit tally)
     streak = defaultdict(lambda: {"tags": "", "n": 0})  # consecutive-frame smoothing
-    tally = {"no_helmet": 0, "no_vest": 0}
-    judge_gloves_live = (HAS_GLOVES_MAIN or gmodel is not None)
+    tally = {}
+    if "helmet" in CHECKS:
+        tally["no_helmet"] = 0
+    if "vest" in CHECKS:
+        tally["no_vest"] = 0
+    judge_gloves_live = ("gloves" in CHECKS) and (HAS_GLOVES_MAIN or gmodel is not None)
     if judge_gloves_live:
         tally["no_gloves"] = 0
     if HAS_MASK:
         tally["no_mask"] = 0
-    tally_path = BASE / "logs" / f"ppe_stats_{today}.csv"
+    tally_name = f"ppe_stats_{today}.csv" if TAG == "all" else f"ppe_{TAG}_stats_{today}.csv"
+    tally_path = BASE / "logs" / tally_name
+    print(f"[INFO] profile checks={sorted(CHECKS)} tally={tally_name}", flush=True)
     if tally_path.exists():  # resume today's counts across restarts
         for line in tally_path.read_text().splitlines()[1:]:
             parts = line.split(",")
@@ -533,6 +558,10 @@ def main():
                     raw_tags, _ = judge_person(pbox, hats, nohats, vests, novests, gloves, nogloves,
                                                masks, nomasks, judge_mask, judge_glove,
                                                glove_absence_counts=glove_absence)
+                    if "helmet" not in CHECKS:  # this station doesn't judge helmets
+                        raw_tags = [t for t in raw_tags if t != "NO HELMET"]
+                    if "vest" not in CHECKS:  # this station doesn't judge vests
+                        raw_tags = [t for t in raw_tags if t != "NO VEST"]
                     raw_key = "+".join(raw_tags)
                     st = streak[int(tid)]
                     st["n"] = st["n"] + 1 if st["tags"] == raw_key else 1
@@ -557,9 +586,9 @@ def main():
                         vtype = "+".join(confirmed)
                         if warn_state.get(int(tid)) != vtype and int(tid) >= 0:  # once per episode
                             warn_state[int(tid)] = vtype
-                            if "NO HELMET" in confirmed:
+                            if "NO HELMET" in confirmed and "no_helmet" in tally:
                                 tally["no_helmet"] += 1
-                            if "NO VEST" in confirmed:
+                            if "NO VEST" in confirmed and "no_vest" in tally:
                                 tally["no_vest"] += 1
                             if "NO GLOVES" in confirmed and "no_gloves" in tally:
                                 tally["no_gloves"] += 1
@@ -641,13 +670,10 @@ def main():
         cv2.putText(frame, f"{hud['persons']} in view | {hud['visitors']} visitors | "
                            f"AI {hud['infer_fps']:.0f} + CAM {cam_fps:.0f} FPS",
                     (10, 54), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (230, 230, 230), 1)
-        extra = ""
-        if "no_gloves" in hud_tally:
-            extra += f" | No gloves: {hud_tally['no_gloves']}"
-        if "no_mask" in hud_tally:
-            extra += f" | No mask: {hud_tally['no_mask']}"
-        cv2.putText(frame, f"No helmet: {hud_tally['no_helmet']} | No vest: {hud_tally['no_vest']}"
-                           f"{extra} | OK: {hud['ok']}",
+        names = {"no_helmet": "No helmet", "no_vest": "No vest",
+                 "no_gloves": "No gloves", "no_mask": "No mask"}
+        cv2.putText(frame, " | ".join(f"{names[k]}: {hud_tally[k]}" for k in hud_tally)
+                           + f" | OK: {hud['ok']}",
                     (10, 70), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 255, 255), 1)
 
         now2 = time.time()
@@ -658,7 +684,7 @@ def main():
             with shared["lock"]:
                 shared["hud"]["cam_fps"] = cam_fps
 
-        cv2.imshow("PPE_Check - Q to quit", frame)
+        cv2.imshow(f"PPE_{TAG.upper()} - Q to quit", frame)
         if cv2.waitKey(1) & 0xFF in (ord("q"), ord("Q")):
             shared["stop"] = True
             break
