@@ -582,7 +582,7 @@ def main():
                 _kept_p, _kept_b = [], []
                 for (b, tid, cf) in sorted(persons, key=lambda t: (t[0][2] - t[0][0]) * (t[0][3] - t[0][1]),
                                            reverse=True):
-                    if all(_iou(b, k) < 0.5 for k in _kept_b):
+                    if all(_iou(b, k) < 0.65 for k in _kept_b):
                         _kept_b.append(b)
                         _kept_p.append((b, tid, cf))
                 persons = _kept_p
