@@ -18,9 +18,9 @@ def main():
     args = ap.parse_args()
     out = BASE / "reports" / f"{args.mode}_report_{args.date}.xlsx"
     out.parent.mkdir(parents=True, exist_ok=True)
-    if args.mode == "ppe":  # counts-only tallies: merge hv + mg stations (+ legacy all-in-one)
+    if args.mode == "ppe":  # counts-only tallies: merge stations (+ legacy files)
         frames = []
-        for tag in ("ppe", "ppe_hv", "ppe_mg"):
+        for tag in ("ppe", "ppe_hv", "ppe_mg", "ppe_mh", "ppe_vg"):
             csv_path = BASE / "logs" / f"{tag}_stats_{args.date}.csv"
             if csv_path.exists():
                 df = pd.read_csv(csv_path)

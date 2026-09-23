@@ -53,12 +53,12 @@ h3.split:first-of-type{margin-top:0}
  <div class="card"><h2>Zone Alert</h2><p>Restricted danger-zone intrusion alarm</p>
   <div class="status" id="s-zone"><span class="dot off"></span>checking&hellip;</div>
   <button class="act start" id="b-zone-start" onclick="ctl('zone','start')">Start</button><button class="act stop" id="b-zone-stop" onclick="ctl('zone','stop')">Stop</button></div>
- <div class="card"><h2>PPE Helmet + Vest</h2><p>Hardhat &amp; safety-vest station</p>
-  <div class="status" id="s-ppe_hv"><span class="dot off"></span>checking&hellip;</div>
-  <button class="act start" id="b-ppe_hv-start" onclick="ctl('ppe_hv','start')">Start</button><button class="act stop" id="b-ppe_hv-stop" onclick="ctl('ppe_hv','stop')">Stop</button></div>
- <div class="card"><h2>PPE Mask + Gloves</h2><p>Face-mask &amp; gloves gate (2&ndash;3 m)</p>
-  <div class="status" id="s-ppe_mg"><span class="dot off"></span>checking&hellip;</div>
-  <button class="act start" id="b-ppe_mg-start" onclick="ctl('ppe_mg','start')">Start</button><button class="act stop" id="b-ppe_mg-stop" onclick="ctl('ppe_mg','stop')">Stop</button></div>
+ <div class="card"><h2>PPE Mask + Helmet</h2><p>Face-mask &amp; hardhat station</p>
+  <div class="status" id="s-ppe_mh"><span class="dot off"></span>checking&hellip;</div>
+  <button class="act start" id="b-ppe_mh-start" onclick="ctl('ppe_mh','start')">Start</button><button class="act stop" id="b-ppe_mh-stop" onclick="ctl('ppe_mh','stop')">Stop</button></div>
+ <div class="card"><h2>PPE Vest + Gloves</h2><p>Safety-vest &amp; blue-gloves gate (2&ndash;3 m)</p>
+  <div class="status" id="s-ppe_vg"><span class="dot off"></span>checking&hellip;</div>
+  <button class="act start" id="b-ppe_vg-start" onclick="ctl('ppe_vg','start')">Start</button><button class="act stop" id="b-ppe_vg-stop" onclick="ctl('ppe_vg','stop')">Stop</button></div>
 </div>
 <div class="sub" style="margin:-6px 0 14px">One shared camera &mdash; starting a station stops the others.</div>
 <div class="stats">
@@ -71,8 +71,8 @@ h3.split:first-of-type{margin-top:0}
 </div>
 <div class="panel"><h2>Reports &amp; data</h2>
   <a class="btn" href="/files/logs/PLACEHOLDER_ZONE">Zone CSV</a>
-  <a class="btn" href="/files/logs/PLACEHOLDER_PPE_HV">Helmet+Vest CSV</a>
-  <a class="btn" href="/files/logs/PLACEHOLDER_PPE_MG">Mask+Gloves CSV</a>
+  <a class="btn" href="/files/logs/PLACEHOLDER_PPE_MH">Mask+Helmet CSV</a>
+  <a class="btn" href="/files/logs/PLACEHOLDER_PPE_VG">Vest+Gloves CSV</a>
  <a class="btn" href="/api/report?mode=zone">Zone Excel</a>
  <a class="btn" href="/api/report?mode=ppe">PPE Excel</a>
  <div class="sub" style="margin:6px 0 0">Excel is generated on demand from today's data.</div></div>
@@ -90,7 +90,7 @@ function setNum(id,v){const e=document.getElementById(id);if(e.textContent!=Stri
 let lastGal='';
 async function refresh(){
  const r=await fetch('/api/status');const j=await r.json();
- for(const m of ['zone','ppe_hv','ppe_mg']){
+ for(const m of ['zone','ppe_mh','ppe_vg']){
   const on=j.modes[m];
   document.getElementById('s-'+m).innerHTML='<span class="dot '+(on?'on pulse':'off')+'"></span>'+(on?'Running':'Stopped');
   document.getElementById('b-'+m+'-start').disabled=on;

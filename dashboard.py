@@ -22,14 +22,14 @@ procs = {}  # mode -> Popen
 MODES = {
     "zone": {"file": "mode_zone.py", "name": "Zone Alert", "desc": "Restricted danger-zone intrusion alarm",
               "extra": []},
-    "ppe_hv": {"file": "mode_ppe.py", "name": "PPE Helmet + Vest", "desc": "Hardhat & safety-vest station",
-               "extra": ["--checks", "helmet,vest"]},
-    "ppe_mg": {"file": "mode_ppe.py", "name": "PPE Mask + Gloves", "desc": "Face-mask & gloves gate (2-3 m)",
-               "extra": ["--checks", "mask,gloves", "--imgsz", "416", "--gloves-model", "ppe_v8m.pt",
+    "ppe_mh": {"file": "mode_ppe.py", "name": "PPE Mask + Helmet", "desc": "Face-mask & hardhat station",
+               "extra": ["--checks", "helmet,mask"]},
+    "ppe_vg": {"file": "mode_ppe.py", "name": "PPE Vest + Gloves", "desc": "Safety-vest & blue-gloves gate (2-3 m)",
+               "extra": ["--checks", "vest,gloves", "--imgsz", "416", "--gloves-model", "ppe_v8m.pt",
                          "--glove-every", "12"]},
 }
-CAM_MODES = ("zone", "ppe_hv", "ppe_mg")  # share one camera: only one runs at a time
-LOCK_OF = {"zone": "zone.lock", "ppe_hv": "ppe_hv.lock", "ppe_mg": "ppe_mg.lock"}
+CAM_MODES = ("zone", "ppe_mh", "ppe_vg")  # share one camera: only one runs at a time
+LOCK_OF = {"zone": "zone.lock", "ppe_mh": "ppe_mh.lock", "ppe_vg": "ppe_vg.lock"}
 
 
 def kill_lock_owner(lock_name):
@@ -155,7 +155,8 @@ def read_stats():
     if zp.exists():
         with open(zp) as f:
             stats["entries"] = max(0, sum(1 for _ in f) - 1)
-    for name in (f"ppe_stats_{day}.csv", f"ppe_hv_stats_{day}.csv", f"ppe_mg_stats_{day}.csv"):
+    for name in (f"ppe_stats_{day}.csv", f"ppe_hv_stats_{day}.csv", f"ppe_mg_stats_{day}.csv",
+                 f"ppe_mh_stats_{day}.csv", f"ppe_vg_stats_{day}.csv"):
         pp = BASE / "logs" / name
         if pp.exists():
             with open(pp) as f:
@@ -195,8 +196,8 @@ class Handler(SimpleHTTPRequestHandler):
         if u.path == "/":
             day = today_str()
             page = PAGE.replace("PLACEHOLDER_ZONE", f"incidents_{day}.csv") \
-                       .replace("PLACEHOLDER_PPE_HV", f"ppe_hv_stats_{day}.csv") \
-                       .replace("PLACEHOLDER_PPE_MG", f"ppe_mg_stats_{day}.csv")
+                       .replace("PLACEHOLDER_PPE_MH", f"ppe_mh_stats_{day}.csv") \
+                       .replace("PLACEHOLDER_PPE_VG", f"ppe_vg_stats_{day}.csv")
             body = page.encode()
             self.send_response(200)
             self.send_header("Content-Type", "text/html; charset=utf-8")
