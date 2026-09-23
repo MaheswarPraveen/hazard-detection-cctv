@@ -48,6 +48,7 @@ except ImportError:
 
 BASE = Path(__file__).parent
 ALARM_WAV = BASE / "alarm.wav"
+TRACKER_YAML = BASE / "tracker_ppe.yaml"  # long-memory ByteTrack (falls back to stock if missing)
 IMG_EXTS = {".jpg", ".jpeg", ".png", ".bmp", ".webp"}
 
 
@@ -471,11 +472,13 @@ def main():
     }
 
     def infer_worker():
+        tracker_cfg = str(TRACKER_YAML) if TRACKER_YAML.exists() else "bytetrack.yaml"
         last_glove = []  # cached [(box, conf, cls)] from backup model
         last_face = ([], [])  # cached ([(box, conf)], [(box, conf)]) from face-zoom
         frame_n = 0
         alarm_on, last_siren = False, 0.0
         it0, itn, infer_fps = time.time(), 0, 0.0
+        perf_t0 = time.time()
         glove_absence = HAS_GLOVES_MAIN  # backup-only gloves: explicit NO-Gloves only
         mask_name = model.names[ids["MASK"]] if ids["MASK"] is not None else "Mask"
         nomask_name = model.names[ids["NO_MASK"]] if ids["NO_MASK"] is not None else "NO-Mask"
@@ -489,7 +492,7 @@ def main():
                 frame_n += 1
                 try:
                     r = model.track(grab, persist=True, imgsz=args.imgsz, conf=base,
-                                    verbose=False, tracker="bytetrack.yaml")[0]
+                                    verbose=False, tracker=tracker_cfg)[0]
                 except Exception as e:
                     print(f"[!] track skipped: {e}", flush=True)
                     time.sleep(0.05)
@@ -625,7 +628,7 @@ def main():
                     seen[int(tid)] += 1
                     if len(seen) > 2000:
                         seen.clear()
-                    if int(tid) >= 0 and seen[int(tid)] >= 2:  # stable track only, no 1-frame ghosts
+                    if int(tid) >= 0 and seen[int(tid)] >= 3:  # stable track only, no ghosts
                         visitors.add(int(tid))
                     if confirmed:
                         vtype = "+".join(confirmed)
@@ -651,6 +654,10 @@ def main():
                 if now - it0 >= 1.0:
                     infer_fps = itn / (now - it0)
                     itn, it0 = 0, now
+                if now - perf_t0 >= 10.0:
+                    print(f"[PERF] infer {infer_fps:.1f}Hz persons={len(persons)} "
+                          f"items={len(items)} visitors={len(visitors)}", flush=True)
+                    perf_t0 = now
 
                 if violations > 0:
                     if winsound is not None and ALARM_WAV.exists():
