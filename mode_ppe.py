@@ -81,14 +81,38 @@ def _iou(a, b):
     return inter / (aa + bb - inter)
 
 
-def dedup_by_iou(boxes, thr=0.6):
-    """Drop near-duplicate boxes (same object detected twice - seen live with
-    flickering double NO-Mask boxes), keep the largest."""
+def dedup_scored(items, thr=0.6):
+    """Drop near-duplicate (box, conf) detections of the same object, keep the
+    highest-confidence one."""
     kept = []
-    for b in sorted(boxes, key=lambda b: (b[2] - b[0]) * (b[3] - b[1]), reverse=True):
-        if all(_iou(b, k) < thr for k in kept):
-            kept.append(b)
+    for b, cf in sorted(items, key=lambda t: t[1], reverse=True):
+        if all(_iou(b, k) < thr for k, _ in kept):
+            kept.append((b, cf))
     return kept
+
+
+def dedup_persons(persons, thr=0.65):
+    """Same-object person tracks detected twice -> keep highest conf triple."""
+    kept = []
+    for (b, tid, cf) in sorted(persons, key=lambda t: t[2], reverse=True):
+        if all(_iou(b, k) < thr for k, _, _ in kept):
+            kept.append((b, tid, cf))
+    return kept
+
+
+CONF_MARGIN = 0.10  # explicit NO-* only counts if it beats the positive by this
+
+
+def _side(has_list, flag_list, margin=CONF_MARGIN):
+    """Arbitrate conflicting detections. Returns (has_item, flag_effective):
+    a NO-* box convicts only when nothing positive is worn, or when it beats
+    the best positive box by `margin`. Stops a stray low-conf NO-Hardhat from
+    overruling a solid Hardhat (or vice versa)."""
+    best_has = max((cf for _, cf in has_list), default=0.0)
+    best_flag = max((cf for _, cf in flag_list), default=0.0)
+    has = best_has > 0.0
+    flag = (best_flag > best_has + margin) if has else (best_flag > 0.0)
+    return has, flag
 
 
 def associated(ppe_box, pbox):
@@ -217,18 +241,19 @@ def face_zoom_boxes(frame, persons, model, ids, args):
 
 def judge_person(pbox, hats, nohats, vests, novests, gloves, nogloves,
                  masks, nomasks, judge_mask, judge_gloves, glove_absence_counts=True):
-    """Return (tags, detail). Absence alone only counts when close + persistent
-    (persistence is handled by the caller streak); explicit NO-* always counts.
+    """Return (tags, detail). Lists hold (box, conf); absence alone only counts
+    when close + persistent (persistence is handled by the caller streak);
+    explicit NO-* convicts via confidence arbitration (_side).
     glove_absence_counts=False when gloves come only from the backup model
     (its recall is poor, so absence means 'can't tell', not 'no gloves')."""
-    has_hat = any(associated(b, pbox) for b in hats)
-    flag_nohat = any(associated(b, pbox) for b in nohats)
-    has_vest = any(associated(b, pbox) for b in vests)
-    flag_novest = any(associated(b, pbox) for b in novests)
-    has_mask = any(associated(b, pbox) for b in masks)
-    flag_nomask = any(associated(b, pbox) for b in nomasks)
-    has_gloves = any(associated(b, pbox) for b in gloves)
-    flag_nogloves = any(associated(b, pbox) for b in nogloves)
+    has_hat, flag_nohat = _side([(b, cf) for b, cf in hats if associated(b, pbox)],
+                                [(b, cf) for b, cf in nohats if associated(b, pbox)])
+    has_vest, flag_novest = _side([(b, cf) for b, cf in vests if associated(b, pbox)],
+                                  [(b, cf) for b, cf in novests if associated(b, pbox)])
+    has_mask, flag_nomask = _side([(b, cf) for b, cf in masks if associated(b, pbox)],
+                                  [(b, cf) for b, cf in nomasks if associated(b, pbox)])
+    has_gloves, flag_nogloves = _side([(b, cf) for b, cf in gloves if associated(b, pbox)],
+                                      [(b, cf) for b, cf in nogloves if associated(b, pbox)])
     tags = []
     if flag_nohat or not has_hat:
         tags.append("NO HELMET")
@@ -320,21 +345,21 @@ def run_image_test(args, model, ids, gmodel, gids, checks):
             if ids["PERSON"] is not None and c == ids["PERSON"]:
                 persons.append((b, float(cf)))
             elif ids["HARDHAT"] is not None and c == ids["HARDHAT"]:
-                hats.append(b)
+                hats.append((b, float(cf)))
             elif ids["NO_HARDHAT"] is not None and c == ids["NO_HARDHAT"]:
-                nohats.append(b)
+                nohats.append((b, float(cf)))
             elif ids["VEST"] is not None and c == ids["VEST"]:
-                vests.append(b)
+                vests.append((b, float(cf)))
             elif ids["NO_VEST"] is not None and c == ids["NO_VEST"]:
-                novests.append(b)
+                novests.append((b, float(cf)))
             elif ids["GLOVES"] is not None and c == ids["GLOVES"]:
-                gloves.append(b)
+                gloves.append((b, float(cf)))
             elif ids["NO_GLOVES"] is not None and c == ids["NO_GLOVES"]:
-                nogloves.append(b)
+                nogloves.append((b, float(cf)))
             elif ids["MASK"] is not None and c == ids["MASK"]:
-                masks.append(b)
+                masks.append((b, float(cf)))
             elif ids["NO_MASK"] is not None and c == ids["NO_MASK"]:
-                nomasks.append(b)
+                nomasks.append((b, float(cf)))
     # optional gloves-only backup model
     if gmodel is not None and not args.ignore_gloves:
         rg = gmodel(frame, conf=args.glove_conf, imgsz=args.glove_imgsz, verbose=False)[0]
@@ -344,7 +369,7 @@ def run_image_test(args, model, ids, gmodel, gids, checks):
                 if c not in (gids["GLOVES"], gids["NO_GLOVES"]) or float(cf) < args.glove_conf:
                     continue
                 b = [float(v) for v in box]
-                (gloves if c == gids["GLOVES"] else nogloves).append(b)
+                (gloves if c == gids["GLOVES"] else nogloves).append((b, float(cf)))
                 x1, y1, x2, y2 = map(int, b)
                 cv2.rectangle(frame, (x1, y1), (x2, y2), (255, 0, 0), 1)
                 cv2.putText(frame, f"{gmodel.names[c]} {float(cf):.2f} (glove-m)",
@@ -355,8 +380,8 @@ def run_image_test(args, model, ids, gmodel, gids, checks):
           f"gloves={len(gloves)} nogloves={len(nogloves)}")
     if args.face_zoom and persons and not args.ignore_mask:
         zm, zn = face_zoom_boxes(frame, [(b, -1, cf) for b, cf in persons], model, ids, args)
-        masks += [b for b, _ in zm]
-        nomasks += [b for b, _ in zn]
+        masks += zm
+        nomasks += zn
         print(f"       face-zoom added: mask={len(zm)} nomask={len(zn)}")
     if not persons:
         print("[TEST] NO Person box kept -> try --person-conf 0.25 --imgsz 640, move to 2m, center chest-up.")
@@ -602,21 +627,21 @@ def main():
                             persons.append((b, int(tid), cf))
                         else:
                             if ids["HARDHAT"] is not None and c == ids["HARDHAT"]:
-                                hats.append(b)
+                                hats.append((b, cf))
                             elif ids["NO_HARDHAT"] is not None and c == ids["NO_HARDHAT"]:
-                                nohats.append(b)
+                                nohats.append((b, cf))
                             elif ids["VEST"] is not None and c == ids["VEST"]:
-                                vests.append(b)
+                                vests.append((b, cf))
                             elif ids["NO_VEST"] is not None and c == ids["NO_VEST"]:
-                                novests.append(b)
+                                novests.append((b, cf))
                             elif ids["GLOVES"] is not None and c == ids["GLOVES"]:
-                                gloves.append(b)
+                                gloves.append((b, cf))
                             elif ids["NO_GLOVES"] is not None and c == ids["NO_GLOVES"]:
-                                nogloves.append(b)
+                                nogloves.append((b, cf))
                             elif ids["MASK"] is not None and c == ids["MASK"]:
-                                masks.append(b)
+                                masks.append((b, cf))
                             elif ids["NO_MASK"] is not None and c == ids["NO_MASK"]:
-                                nomasks.append(b)
+                                nomasks.append((b, cf))
 
                 # gloves-only backup (its person/helmet outputs are ignored -
                 # that weight is blind there). Gated on persons present.
@@ -639,7 +664,7 @@ def main():
                         print(f"[!] gloves-model frame skipped: {e}", flush=True)
                 if gmodel is not None:
                     for (b, cf, c) in last_glove:
-                        (gloves if c == gids.get("GLOVES") else nogloves).append(b)
+                        (gloves if c == gids.get("GLOVES") else nogloves).append((b, cf))
 
                 # face-zoom second look for tiny masks (the 2m+ fix)
                 if args.face_zoom and not args.ignore_mask and persons \
@@ -649,28 +674,20 @@ def main():
                     except Exception as e:
                         print(f"[!] face-zoom frame skipped: {e}", flush=True)
                 if args.face_zoom and not args.ignore_mask:
-                    for (b, cf) in last_face[0]:
-                        masks.append(b)
-                    for (b, cf) in last_face[1]:
-                        nomasks.append(b)
+                    masks += last_face[0]
+                    nomasks += last_face[1]
 
                 # dedup: same object detected twice (seen live: double NO-Mask
                 # boxes flickering with alternating track IDs)
-                _kept_p, _kept_b = [], []
-                for (b, tid, cf) in sorted(persons, key=lambda t: (t[0][2] - t[0][0]) * (t[0][3] - t[0][1]),
-                                           reverse=True):
-                    if all(_iou(b, k) < 0.65 for k in _kept_b):
-                        _kept_b.append(b)
-                        _kept_p.append((b, tid, cf))
-                persons = _kept_p
-                hats = dedup_by_iou(hats)
-                nohats = dedup_by_iou(nohats)
-                vests = dedup_by_iou(vests)
-                novests = dedup_by_iou(novests)
-                gloves = dedup_by_iou(gloves)
-                nogloves = dedup_by_iou(nogloves)
-                masks = dedup_by_iou(masks)
-                nomasks = dedup_by_iou(nomasks)
+                persons = dedup_persons(persons)
+                hats = dedup_scored(hats)
+                nohats = dedup_scored(nohats)
+                vests = dedup_scored(vests)
+                novests = dedup_scored(novests)
+                gloves = dedup_scored(gloves)
+                nogloves = dedup_scored(nogloves)
+                masks = dedup_scored(masks)
+                nomasks = dedup_scored(nomasks)
 
                 violations = 0
                 all_bad = set()  # confirmed violation tags across everyone in view
