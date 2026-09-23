@@ -16,21 +16,31 @@ def main():
     ap.add_argument("--mode", default="zone", choices=["zone", "ppe"])
     ap.add_argument("--date", default=datetime.now().strftime("%Y-%m-%d"))
     args = ap.parse_args()
-    if args.mode == "ppe":
-        csv_path = BASE / "logs" / f"ppe_stats_{args.date}.csv"
-    else:
-        csv_path = BASE / "logs" / f"{PREFIX[args.mode]}_{args.date}.csv"
     out = BASE / "reports" / f"{args.mode}_report_{args.date}.xlsx"
     out.parent.mkdir(parents=True, exist_ok=True)
+    if args.mode == "ppe":  # counts-only tallies: merge hv + mg stations (+ legacy all-in-one)
+        frames = []
+        for tag in ("ppe", "ppe_hv", "ppe_mg"):
+            csv_path = BASE / "logs" / f"{tag}_stats_{args.date}.csv"
+            if csv_path.exists():
+                df = pd.read_csv(csv_path)
+                df["station"] = tag
+                frames.append(df)
+        if not frames:
+            print(f"[!] No log yet: logs/ppe_*_stats_{args.date}.csv")
+            return
+        tallies = pd.concat(frames, ignore_index=True)
+        summary = tallies.groupby("metric", as_index=False)["count"].sum()
+        with pd.ExcelWriter(out) as w:
+            tallies.to_excel(w, sheet_name="Daily Stats", index=False)
+            summary.to_excel(w, sheet_name="Combined", index=False)
+        print(f"[OK] {out} (PPE tally, {len(frames)} station file(s))")
+        return
+    csv_path = BASE / "logs" / f"{PREFIX[args.mode]}_{args.date}.csv"
     if not csv_path.exists():
         print(f"[!] No log yet: {csv_path}")
         return
     df = pd.read_csv(csv_path)
-    if args.mode == "ppe":  # counts-only tally, no timestamps
-        with pd.ExcelWriter(out) as w:
-            df.to_excel(w, sheet_name="Daily Stats", index=False)
-        print(f"[OK] {out} (PPE tally)")
-        return
     summary = df.groupby("violation_type").size().reset_index(name="count")
     hourly = df.copy()
     hourly["hour"] = pd.to_datetime(hourly["time"]).dt.strftime("%H:00")

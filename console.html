@@ -11,8 +11,8 @@ h1{font-size:22px;font-weight:700}
 #clock{font-variant-numeric:tabular-nums;font-size:13px;color:var(--muted);margin-top:4px}
 .sub{color:var(--muted);font-size:13px;margin-bottom:22px}
 #theme{border:1px solid var(--border);background:var(--card);color:var(--text);border-radius:20px;padding:7px 16px;font-size:13px;font-weight:600;cursor:pointer;white-space:nowrap}
-.grid{display:grid;grid-template-columns:1fr 1fr;gap:14px;margin-bottom:14px}
-@media(max-width:700px){.grid{grid-template-columns:1fr}}
+.grid{display:grid;grid-template-columns:1fr 1fr 1fr;gap:14px;margin-bottom:14px}
+@media(max-width:900px){.grid{grid-template-columns:1fr}}
 .card{background:var(--card);border:1px solid var(--border);border-radius:12px;padding:18px;transition:background .3s,border .3s}
 .card h2{font-size:16px;margin-bottom:4px}
 .card p{font-size:13px;color:var(--muted);margin-bottom:12px}
@@ -26,8 +26,9 @@ button.act:active{transform:scale(.96)}
 .start{background:#16a34a;color:#fff}.start:hover{background:#15803d}
 .stop{background:transparent;color:var(--text);border:1px solid var(--border)}
 button.act:disabled{opacity:.4;cursor:default}
-.stats{display:grid;grid-template-columns:repeat(4,1fr);gap:14px;margin:14px 0}
-@media(max-width:700px){.stats{grid-template-columns:1fr 1fr}}
+.stats{display:grid;grid-template-columns:repeat(6,1fr);gap:14px;margin:14px 0}
+@media(max-width:900px){.stats{grid-template-columns:1fr 1fr 1fr}}
+@media(max-width:600px){.stats{grid-template-columns:1fr 1fr}}
 .stat{background:var(--card);border:1px solid var(--border);border-radius:12px;padding:14px 16px;transition:background .3s}
 .stat b{font-size:24px;display:block;font-variant-numeric:tabular-nums;transition:color .3s}
 .stat b.bump{color:var(--danger)}
@@ -52,19 +53,26 @@ h3.split:first-of-type{margin-top:0}
  <div class="card"><h2>Zone Alert</h2><p>Restricted danger-zone intrusion alarm</p>
   <div class="status" id="s-zone"><span class="dot off"></span>checking&hellip;</div>
   <button class="act start" id="b-zone-start" onclick="ctl('zone','start')">Start</button><button class="act stop" id="b-zone-stop" onclick="ctl('zone','stop')">Stop</button></div>
- <div class="card"><h2>PPE Check</h2><p>Helmet + vest live warnings</p>
-  <div class="status" id="s-ppe"><span class="dot off"></span>checking&hellip;</div>
-  <button class="act start" id="b-ppe-start" onclick="ctl('ppe','start')">Start</button><button class="act stop" id="b-ppe-stop" onclick="ctl('ppe','stop')">Stop</button></div>
+ <div class="card"><h2>PPE Helmet + Vest</h2><p>Hardhat &amp; safety-vest station</p>
+  <div class="status" id="s-ppe_hv"><span class="dot off"></span>checking&hellip;</div>
+  <button class="act start" id="b-ppe_hv-start" onclick="ctl('ppe_hv','start')">Start</button><button class="act stop" id="b-ppe_hv-stop" onclick="ctl('ppe_hv','stop')">Stop</button></div>
+ <div class="card"><h2>PPE Mask + Gloves</h2><p>Face-mask &amp; gloves gate (2&ndash;3 m)</p>
+  <div class="status" id="s-ppe_mg"><span class="dot off"></span>checking&hellip;</div>
+  <button class="act start" id="b-ppe_mg-start" onclick="ctl('ppe_mg','start')">Start</button><button class="act stop" id="b-ppe_mg-stop" onclick="ctl('ppe_mg','stop')">Stop</button></div>
 </div>
+<div class="sub" style="margin:-6px 0 14px">One shared camera &mdash; starting a station stops the others.</div>
 <div class="stats">
  <div class="stat"><b id="st-entries">0</b><span>danger entries today</span></div>
  <div class="stat"><b id="st-visitors">0</b><span>visitors seen</span></div>
  <div class="stat"><b id="st-nohelmet">0</b><span>no-helmet events</span></div>
  <div class="stat"><b id="st-novest">0</b><span>no-vest events</span></div>
+ <div class="stat"><b id="st-nomask">0</b><span>no-mask events</span></div>
+ <div class="stat"><b id="st-nogloves">0</b><span>no-gloves events</span></div>
 </div>
 <div class="panel"><h2>Reports &amp; data</h2>
- <a class="btn" href="/files/logs/PLACEHOLDER_ZONE">Zone CSV</a>
- <a class="btn" href="/files/logs/PLACEHOLDER_PPE">PPE tally CSV</a>
+  <a class="btn" href="/files/logs/PLACEHOLDER_ZONE">Zone CSV</a>
+  <a class="btn" href="/files/logs/PLACEHOLDER_PPE_HV">Helmet+Vest CSV</a>
+  <a class="btn" href="/files/logs/PLACEHOLDER_PPE_MG">Mask+Gloves CSV</a>
  <a class="btn" href="/api/report?mode=zone">Zone Excel</a>
  <a class="btn" href="/api/report?mode=ppe">PPE Excel</a>
  <div class="sub" style="margin:6px 0 0">Excel is generated on demand from today's data.</div></div>
@@ -82,7 +90,7 @@ function setNum(id,v){const e=document.getElementById(id);if(e.textContent!=Stri
 let lastGal='';
 async function refresh(){
  const r=await fetch('/api/status');const j=await r.json();
- for(const m of ['zone','ppe']){
+ for(const m of ['zone','ppe_hv','ppe_mg']){
   const on=j.modes[m];
   document.getElementById('s-'+m).innerHTML='<span class="dot '+(on?'on pulse':'off')+'"></span>'+(on?'Running':'Stopped');
   document.getElementById('b-'+m+'-start').disabled=on;
@@ -90,6 +98,7 @@ async function refresh(){
  }
  setNum('st-entries',j.stats.entries);setNum('st-visitors',j.stats.visitors);
  setNum('st-nohelmet',j.stats.no_helmet);setNum('st-novest',j.stats.no_vest);
+ setNum('st-nomask',j.stats.no_mask);setNum('st-nogloves',j.stats.no_gloves);
  const key=JSON.stringify(j.evidence);
  if(key!==lastGal){lastGal=key;renderGal(j.evidence);}
 }

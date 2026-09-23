@@ -290,10 +290,14 @@ def run_image_test(args, model, ids, gmodel, gids, checks):
         cv2.putText(frame, "OK" if not tags else "WARNING " + "+".join(tags), (x1, y1 - 8),
                     cv2.FONT_HERSHEY_SIMPLEX, 0.6, color, 2)
         extra = []
-        if not judge_mask:
+        if "mask" not in checks:
+            extra.append("mask not in profile")
+        elif not judge_mask:
             extra.append(f"mask skipped (h={ph:.0f}<{args.min_face_h})")
         if (ids["GLOVES"] is None and gmodel is None) or args.ignore_gloves:
             extra.append("gloves n/a")
+        elif "gloves" not in checks:
+            extra.append("gloves not in profile")
         elif not judge_gloves:
             extra.append(f"gloves skipped (h={ph:.0f}<{args.min_glove_h})")
         print(f"[TEST] person{i} conf={pconf:.2f} h={ph:.0f}px -> "

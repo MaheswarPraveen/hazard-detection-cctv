@@ -17,9 +17,14 @@ PORT = 8000
 procs = {}  # mode -> Popen
 
 MODES = {
-    "zone": {"file": "mode_zone.py", "name": "Zone Alert", "desc": "Restricted danger-zone intrusion alarm"},
-    "ppe": {"file": "mode_ppe.py", "name": "PPE Check", "desc": "Helmet + vest live warnings"},
+    "zone": {"file": "mode_zone.py", "name": "Zone Alert", "desc": "Restricted danger-zone intrusion alarm",
+              "extra": []},
+    "ppe_hv": {"file": "mode_ppe.py", "name": "PPE Helmet + Vest", "desc": "Hardhat & safety-vest station",
+               "extra": ["--checks", "helmet,vest"]},
+    "ppe_mg": {"file": "mode_ppe.py", "name": "PPE Mask + Gloves", "desc": "Face-mast & gloves station (2-3 m gate)",
+               "extra": ["--checks", "mask,gloves", "--gloves-model", "ppe_v8m.pt", "--glove-every", "8"]},
 }
+CAM_MODES = ("zone", "ppe_hv", "ppe_mg")  # share one camera: only one runs at a time
 
 PAGE = """<!doctype html><html><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
@@ -109,17 +114,18 @@ def today_str():
 
 def read_stats():
     day = today_str()
-    stats = {"entries": 0, "visitors": 0, "no_helmet": 0, "no_vest": 0}
+    stats = {"entries": 0, "visitors": 0, "no_helmet": 0, "no_vest": 0, "no_mask": 0, "no_gloves": 0}
     zp = BASE / "logs" / f"incidents_{day}.csv"
     if zp.exists():
         with open(zp) as f:
             stats["entries"] = max(0, sum(1 for _ in f) - 1)
-    pp = BASE / "logs" / f"ppe_stats_{day}.csv"
-    if pp.exists():
-        with open(pp) as f:
-            for row in csv.DictReader(f):
-                if row["metric"] in stats and row["metric"] != "entries":
-                    stats[row["metric"]] = int(row["count"])
+    for name in (f"ppe_stats_{day}.csv", f"ppe_hv_stats_{day}.csv", f"ppe_mg_stats_{day}.csv"):
+        pp = BASE / "logs" / name
+        if pp.exists():
+            with open(pp) as f:
+                for row in csv.DictReader(f):
+                    if row["metric"] in stats and row["metric"] != "entries":
+                        stats[row["metric"]] += int(row["count"])
     return stats
 
 
@@ -152,7 +158,9 @@ class Handler(SimpleHTTPRequestHandler):
         u = urlparse(self.path)
         if u.path == "/":
             day = today_str()
-            page = PAGE.replace("PLACEHOLDER_ZONE", f"incidents_{day}.csv").replace("PLACEHOLDER_PPE", f"ppe_stats_{day}.csv")
+            page = PAGE.replace("PLACEHOLDER_ZONE", f"incidents_{day}.csv") \
+                       .replace("PLACEHOLDER_PPE_HV", f"ppe_hv_stats_{day}.csv") \
+                       .replace("PLACEHOLDER_PPE_MG", f"ppe_mg_stats_{day}.csv")
             body = page.encode()
             self.send_response(200)
             self.send_header("Content-Type", "text/html; charset=utf-8")
@@ -160,7 +168,7 @@ class Handler(SimpleHTTPRequestHandler):
             self.end_headers()
             self.wfile.write(body)
         elif u.path == "/api/status":
-            alive = {m: (p in procs and procs[p].poll() is None) for m, p in (("zone", "zone"), ("ppe", "ppe"))}
+            alive = {m: (m in procs and procs[m].poll() is None) for m in MODES}
             self._json({"modes": alive, "stats": read_stats(), "evidence": evidence_list()})
         elif u.path == "/api/report":
             mode = parse_qs(u.query).get("mode", ["zone"])[0]
@@ -196,13 +204,18 @@ class Handler(SimpleHTTPRequestHandler):
             if old is not None and old.poll() is None:
                 self._json({"ok": True, "already": True});
                 return
+            for other in CAM_MODES:  # one camera: starting one station stops the others
+                if other != mode:
+                    p = procs.get(other)
+                    if p is not None and p.poll() is None:
+                        p.terminate()
             log = open(BASE / f"{mode}_dash.log", "ab")
             flags = 0
             if sys.platform == "win32":
                 flags = 0x00000008 | 0x00000200  # DETACHED_PROCESS | NEW_PROCESS_GROUP
             procs[mode] = subprocess.Popen(
                 [sys.executable, "-u", MODES[mode]["file"], "--source", "0", "--camera", "CAM01"]
-                + (["--gloves-model", "ppe_v8m.pt", "--glove-every", "8"] if mode == "ppe" else []),
+                + MODES[mode].get("extra", []),
                 cwd=BASE, stdout=log, stderr=subprocess.STDOUT,
                 stdin=subprocess.DEVNULL, close_fds=True,
                 creationflags=flags)
