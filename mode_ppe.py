@@ -441,9 +441,9 @@ def main():
     ap.add_argument("--ppe-conf", type=float, default=0.30, help="helmet/vest + explicit NO-* boxes")
     ap.add_argument("--mask-conf", type=float, default=0.20, help="mask boxes are tiny -> keep low")
     ap.add_argument("--glove-conf", type=float, default=0.20, help="glove boxes are tiny -> keep low")
-    ap.add_argument("--smooth", type=int, default=3, help="consecutive violation frames before a warning counts (fast to alarm)")
-    ap.add_argument("--clear-after", type=int, default=6,
-                    help="consecutive clear frames before a warning lifts (slow to clear kills flicker)")
+    ap.add_argument("--smooth", type=int, default=3, help="frames to raise an alarm (fast to warn)")
+    ap.add_argument("--clear-after", type=int, default=12,
+                    help="contrary frames before a LOCKED verdict flips (slow to un-warn: kills YES/NO flicker)")
     ap.add_argument("--min-face-h", type=int, default=130, help="px person height below which mask is NOT judged (FAR)")
     ap.add_argument("--min-glove-h", type=int, default=180, help="px person height below which gloves are NOT judged (FAR)")
     ap.add_argument("--ignore-mask", action="store_true", help="turn off mask checking (far-field cams)")
@@ -538,7 +538,10 @@ def main():
         today = datetime.now().strftime("%Y-%m-%d")
         visitors, ok_visitors = set(), set()
         warn_state = {}  # track_id -> last counted violation (rate-limit tally)
-        streak = defaultdict(lambda: {"state": "ok", "vio": 0, "ok": 0, "tags": ""})  # per-track latch
+        streak = defaultdict(lambda: defaultdict(lambda: {"v": None, "n": 0, "p": None}))
+    # per-track per-item LOCKED verdicts: {"v": None|bool(locked), "n": disagree run, "p": pending init dir}.
+    # Alarm flips in `smooth` frames, clear flips need `clear_after` - brief
+    # misreads can never move the board, siren, or tally.
         seen = defaultdict(int)  # track_id -> consecutive sightings (ghost filter for visitors)
         tally = {}
         if "helmet" in CHECKS:
@@ -713,24 +716,39 @@ def main():
                         raw_tags = [t for t in raw_tags if t != "NO HELMET"]
                     if "vest" not in CHECKS:  # this station doesn't judge vests
                         raw_tags = [t for t in raw_tags if t != "NO VEST"]
-                    raw_key = "+".join(raw_tags)
-                    st = streak[int(tid)]
-                    # asymmetric latch: quick to warn, reluctant to clear.
-                    # Boundary-flicker (helmet seen/missed alternating) can no
-                    # longer flap the board, siren, or tally.
-                    if raw_tags:
-                        st["vio"] += 1
-                        st["ok"] = 0
-                        st["tags"] = raw_key
-                        if st["vio"] >= args.smooth:
-                            st["state"] = "bad"
-                    else:
-                        st["ok"] += 1
-                        st["vio"] = 0
-                        if st["ok"] >= args.clear_after:
-                            st["state"] = "ok"
-                            st["tags"] = ""
-                    confirmed = st["tags"].split("+") if st["state"] == "bad" else []
+                    # per-item locks: instant raw verdict -> locked verdict.
+                    # init needs `smooth` bad frames (or 2 good) to set; a locked
+                    # verdict flips only after `smooth` bad / `clear_after` good
+                    # frames in a row. Flicker dies here, not on the board.
+                    # (raw_tags are already profile-filtered upstream.)
+                    locked_tags = []
+                    for _item, _tag, _judged in (("helmet", "NO HELMET", True),
+                                                 ("vest", "NO VEST", True),
+                                                 ("mask", "NO MASK", judge_mask),
+                                                 ("gloves", "NO GLOVES", judge_glove)):
+                        _cur = (_tag in raw_tags) and _judged
+                        _lk = streak[int(tid)][_item]
+                        if _lk["v"] is None:
+                            if _lk["p"] == _cur:
+                                _lk["n"] += 1
+                            else:
+                                _lk["p"], _lk["n"] = _cur, 1
+                            _need = args.smooth if _cur else 2
+                            if _lk["n"] >= _need:
+                                _lk["v"], _lk["n"], _lk["p"] = _cur, 0, None
+                            _verdict = _lk["v"] if _lk["v"] is not None else _cur
+                        else:
+                            if _cur == _lk["v"]:
+                                _lk["n"] = 0
+                            else:
+                                _lk["n"] += 1
+                                _need = args.smooth if _cur else args.clear_after
+                                if _lk["n"] >= _need:
+                                    _lk["v"], _lk["n"] = _cur, 0
+                            _verdict = _lk["v"]
+                        if _verdict:
+                            locked_tags.append(_tag)
+                    confirmed = locked_tags
                     if confirmed:
                         all_bad.update(confirmed)
                     far_note = "FAR" if (HAS_MASK and ph < args.min_face_h) else ""
