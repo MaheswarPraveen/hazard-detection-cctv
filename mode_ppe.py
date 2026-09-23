@@ -441,7 +441,9 @@ def main():
     ap.add_argument("--ppe-conf", type=float, default=0.30, help="helmet/vest + explicit NO-* boxes")
     ap.add_argument("--mask-conf", type=float, default=0.20, help="mask boxes are tiny -> keep low")
     ap.add_argument("--glove-conf", type=float, default=0.20, help="glove boxes are tiny -> keep low")
-    ap.add_argument("--smooth", type=int, default=3, help="consecutive frames before a warning counts (kills flicker)")
+    ap.add_argument("--smooth", type=int, default=3, help="consecutive violation frames before a warning counts (fast to alarm)")
+    ap.add_argument("--clear-after", type=int, default=6,
+                    help="consecutive clear frames before a warning lifts (slow to clear kills flicker)")
     ap.add_argument("--min-face-h", type=int, default=130, help="px person height below which mask is NOT judged (FAR)")
     ap.add_argument("--min-glove-h", type=int, default=180, help="px person height below which gloves are NOT judged (FAR)")
     ap.add_argument("--ignore-mask", action="store_true", help="turn off mask checking (far-field cams)")
@@ -530,7 +532,7 @@ def main():
         today = datetime.now().strftime("%Y-%m-%d")
         visitors, ok_visitors = set(), set()
         warn_state = {}  # track_id -> last counted violation (rate-limit tally)
-        streak = defaultdict(lambda: {"tags": "", "n": 0})  # consecutive-frame smoothing
+        streak = defaultdict(lambda: {"state": "ok", "vio": 0, "ok": 0, "tags": ""})  # per-track latch
         seen = defaultdict(int)  # track_id -> consecutive sightings (ghost filter for visitors)
         tally = {}
         if "helmet" in CHECKS:
@@ -704,9 +706,22 @@ def main():
                         raw_tags = [t for t in raw_tags if t != "NO VEST"]
                     raw_key = "+".join(raw_tags)
                     st = streak[int(tid)]
-                    st["n"] = st["n"] + 1 if st["tags"] == raw_key else 1
-                    st["tags"] = raw_key
-                    confirmed = raw_tags if st["n"] >= args.smooth else []
+                    # asymmetric latch: quick to warn, reluctant to clear.
+                    # Boundary-flicker (helmet seen/missed alternating) can no
+                    # longer flap the board, siren, or tally.
+                    if raw_tags:
+                        st["vio"] += 1
+                        st["ok"] = 0
+                        st["tags"] = raw_key
+                        if st["vio"] >= args.smooth:
+                            st["state"] = "bad"
+                    else:
+                        st["ok"] += 1
+                        st["vio"] = 0
+                        if st["ok"] >= args.clear_after:
+                            st["state"] = "ok"
+                            st["tags"] = ""
+                    confirmed = st["tags"].split("+") if st["state"] == "bad" else []
                     if confirmed:
                         all_bad.update(confirmed)
                     far_note = "FAR" if (HAS_MASK and ph < args.min_face_h) else ""
@@ -835,6 +850,22 @@ def main():
         cv2.circle(frame, (26, 23), 6, (255, 255, 255), -1)
         cv2.putText(frame, "WARNING" if v > 0 else "ALL COMPLIANT", (40, 28),
                     cv2.FONT_HERSHEY_SIMPLEX, 0.6, (255, 255, 255), 2)
+        # right-side YES/NO board: explicit per-item verdict text.
+        fh, fw = frame.shape[:2]
+        bw, bh = 190, 34 + 30 * max(1, len(panel))
+        bx0, by0 = fw - bw - 10, 90
+        cv2.rectangle(frame, (bx0, by0), (fw - 10, by0 + bh), (25, 25, 25), -1)
+        cv2.putText(frame, "EQUIPMENT", (bx0 + 10, by0 + 24),
+                    cv2.FONT_HERSHEY_SIMPLEX, 0.55, (255, 255, 255), 2)
+        for i, (plabel, state) in enumerate(panel):
+            if state == "ok":
+                ptxt, pcol = f"{plabel}: YES", (0, 210, 0)
+            elif state == "bad":
+                ptxt, pcol = f"{plabel}: NO", (0, 0, 255)
+            else:
+                ptxt, pcol = f"{plabel}: --", (150, 150, 150)
+            cv2.putText(frame, ptxt, (bx0 + 10, by0 + 54 + i * 30),
+                        cv2.FONT_HERSHEY_SIMPLEX, 0.6, pcol, 2)
         # bottom status bar: one dark strip, dots + labels per item.
         # green = worn, red = missing, gray = nobody in view. Tallies live on
         # the dashboard, not on the video.
