@@ -241,19 +241,26 @@ def face_zoom_boxes(frame, persons, model, ids, args):
 
 def judge_person(pbox, hats, nohats, vests, novests, gloves, nogloves,
                  masks, nomasks, judge_mask, judge_gloves, glove_absence_counts=True):
-    """Return (tags, detail). Lists hold (box, conf); absence alone only counts
-    when close + persistent (persistence is handled by the caller streak);
+    """Return (tags, detail, confs). Lists hold (box, conf); absence alone only
+    counts when close + persistent (persistence is handled by the caller locks);
     explicit NO-* convicts via confidence arbitration (_side).
+    confs = {item: (best associated positive conf, best associated NO-* conf)}.
     glove_absence_counts=False when gloves come only from the backup model
     (its recall is poor, so absence means 'can't tell', not 'no gloves')."""
-    has_hat, flag_nohat = _side([(b, cf) for b, cf in hats if associated(b, pbox)],
-                                [(b, cf) for b, cf in nohats if associated(b, pbox)])
-    has_vest, flag_novest = _side([(b, cf) for b, cf in vests if associated(b, pbox)],
-                                  [(b, cf) for b, cf in novests if associated(b, pbox)])
-    has_mask, flag_nomask = _side([(b, cf) for b, cf in masks if associated(b, pbox)],
-                                  [(b, cf) for b, cf in nomasks if associated(b, pbox)])
-    has_gloves, flag_nogloves = _side([(b, cf) for b, cf in gloves if associated(b, pbox)],
-                                      [(b, cf) for b, cf in nogloves if associated(b, pbox)])
+    _assoc = lambda items: [(b, cf) for b, cf in items if associated(b, pbox)]
+    a_hats, a_nohats = _assoc(hats), _assoc(nohats)
+    a_vests, a_novests = _assoc(vests), _assoc(novests)
+    a_masks, a_nomasks = _assoc(masks), _assoc(nomasks)
+    a_gloves, a_nogloves = _assoc(gloves), _assoc(nogloves)
+    has_hat, flag_nohat = _side(a_hats, a_nohats)
+    has_vest, flag_novest = _side(a_vests, a_novests)
+    has_mask, flag_nomask = _side(a_masks, a_nomasks)
+    has_gloves, flag_nogloves = _side(a_gloves, a_nogloves)
+    _best = lambda pairs: max((cf for _, cf in pairs), default=0.0)
+    confs = {"helmet": (_best(a_hats), _best(a_nohats)),
+             "vest": (_best(a_vests), _best(a_novests)),
+             "mask": (_best(a_masks), _best(a_nomasks)),
+             "gloves": (_best(a_gloves), _best(a_nogloves))}
     tags = []
     if flag_nohat or not has_hat:
         tags.append("NO HELMET")
@@ -263,7 +270,7 @@ def judge_person(pbox, hats, nohats, vests, novests, gloves, nogloves,
         tags.append("NO GLOVES")
     if judge_mask and (flag_nomask or not has_mask):
         tags.append("NO MASK")
-    return tags, (has_hat, has_vest, has_mask, has_gloves)
+    return tags, (has_hat, has_vest, has_mask, has_gloves), confs
 
 
 # ---------------------------------------------------------------- model loading
@@ -393,7 +400,7 @@ def run_image_test(args, model, ids, gmodel, gids, checks):
         judge_gloves = not args.ignore_gloves and "gloves" in checks \
             and (gmodel is not None or ids["GLOVES"] is not None) \
             and ph >= args.min_glove_h
-        tags, _ = judge_person(pbox, hats, nohats, vests, novests, gloves, nogloves,
+        tags, _, _ = judge_person(pbox, hats, nohats, vests, novests, gloves, nogloves,
                                masks, nomasks, judge_mask, judge_gloves,
                                glove_absence_counts=(ids["GLOVES"] is not None))
         if "helmet" not in checks:
@@ -539,9 +546,10 @@ def main():
         visitors, ok_visitors = set(), set()
         warn_state = {}  # track_id -> last counted violation (rate-limit tally)
         streak = defaultdict(lambda: defaultdict(lambda: {"v": None, "n": 0, "p": None}))
-    # per-track per-item LOCKED verdicts: {"v": None|bool(locked), "n": disagree run, "p": pending init dir}.
-    # Alarm flips in `smooth` frames, clear flips need `clear_after` - brief
-    # misreads can never move the board, siren, or tally.
+        # per-track per-item LOCKED verdicts: {"v": None|bool(locked), "n": disagree run, "p": pending init dir}.
+        # Alarm flips in `smooth` frames, clear flips need `clear_after` - brief
+        # misreads can never move the board, siren, or tally.
+        last_logged = {}  # tid -> (raw, locked) signature: DBG prints transitions only
         seen = defaultdict(int)  # track_id -> consecutive sightings (ghost filter for visitors)
         tally = {}
         if "helmet" in CHECKS:
@@ -709,7 +717,7 @@ def main():
                     judge_glove = judge_gloves_live and ph >= args.min_glove_h
                     mask_judged_any = mask_judged_any or judge_mask
                     glove_judged_any = glove_judged_any or judge_glove
-                    raw_tags, _ = judge_person(pbox, hats, nohats, vests, novests, gloves, nogloves,
+                    raw_tags, _, _confs = judge_person(pbox, hats, nohats, vests, novests, gloves, nogloves,
                                                masks, nomasks, judge_mask, judge_glove,
                                                glove_absence_counts=glove_absence)
                     if "helmet" not in CHECKS:  # this station doesn't judge helmets
@@ -749,6 +757,13 @@ def main():
                         if _verdict:
                             locked_tags.append(_tag)
                     confirmed = locked_tags
+                    _sig = (tuple(raw_tags), tuple(confirmed))
+                    if last_logged.get(int(tid)) != _sig:  # transition only: the flicker record
+                        last_logged[int(tid)] = _sig
+                        _c = {k: (round(a, 2), round(b, 2)) for k, (a, b) in _confs.items()}
+                        print(f"[DBG] tid={tid} raw={raw_tags} locked={confirmed} "
+                              f"hat={_c['helmet']} vest={_c['vest']} "
+                              f"mask={_c['mask']} glove={_c['gloves']}", flush=True)
                     if confirmed:
                         all_bad.update(confirmed)
                     far_note = "FAR" if (HAS_MASK and ph < args.min_face_h) else ""
