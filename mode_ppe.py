@@ -850,34 +850,28 @@ def main():
         cv2.circle(frame, (26, 23), 6, (255, 255, 255), -1)
         cv2.putText(frame, "WARNING" if v > 0 else "ALL COMPLIANT", (40, 28),
                     cv2.FONT_HERSHEY_SIMPLEX, 0.6, (255, 255, 255), 2)
-        # right-side YES/NO board: explicit per-item verdict text.
         fh, fw = frame.shape[:2]
-        bw, bh = 190, 34 + 30 * max(1, len(panel))
-        bx0, by0 = fw - bw - 10, 90
-        cv2.rectangle(frame, (bx0, by0), (fw - 10, by0 + bh), (25, 25, 25), -1)
-        cv2.putText(frame, "EQUIPMENT", (bx0 + 10, by0 + 24),
-                    cv2.FONT_HERSHEY_SIMPLEX, 0.55, (255, 255, 255), 2)
-        for i, (plabel, state) in enumerate(panel):
-            if state == "ok":
-                ptxt, pcol = f"{plabel}: YES", (0, 210, 0)
-            elif state == "bad":
-                ptxt, pcol = f"{plabel}: NO", (0, 0, 255)
-            else:
-                ptxt, pcol = f"{plabel}: --", (150, 150, 150)
-            cv2.putText(frame, ptxt, (bx0 + 10, by0 + 54 + i * 30),
-                        cv2.FONT_HERSHEY_SIMPLEX, 0.6, pcol, 2)
-        # bottom status bar: one dark strip, dots + labels per item.
+        # bottom status bar: one dark strip, dot + LABEL + YES/NO per item.
         # green = worn, red = missing, gray = nobody in view. Tallies live on
         # the dashboard, not on the video.
         cv2.rectangle(frame, (0, fh - 32), (fw, fh), (20, 20, 20), -1)
         bx = 12
         for (plabel, state) in panel:
-            dot = (0, 200, 0) if state == "ok" else ((0, 0, 255) if state == "bad" else (130, 130, 130))
+            if state == "ok":
+                dot, stxt, scol = (0, 200, 0), "YES", (0, 210, 0)
+            elif state == "bad":
+                dot, stxt, scol = (0, 0, 255), "NO", (0, 0, 255)
+            else:
+                dot, stxt, scol = (130, 130, 130), "--", (150, 150, 150)
             cv2.circle(frame, (bx + 6, fh - 16), 6, dot, -1)
             cv2.putText(frame, plabel, (bx + 17, fh - 11),
                         cv2.FONT_HERSHEY_SIMPLEX, 0.5, (235, 235, 235), 1)
             (tw, _th), _ = cv2.getTextSize(plabel, cv2.FONT_HERSHEY_SIMPLEX, 0.5, 1)
-            bx += 17 + tw + 20
+            sx = bx + 17 + tw + 8
+            cv2.putText(frame, stxt, (sx, fh - 11),
+                        cv2.FONT_HERSHEY_SIMPLEX, 0.5, scol, 1)
+            (tws, _ths), _ = cv2.getTextSize(stxt, cv2.FONT_HERSHEY_SIMPLEX, 0.5, 1)
+            bx = sx + tws + 24
         cv2.putText(frame, f"{hud['persons']} in view", (bx, fh - 11),
                     cv2.FONT_HERSHEY_SIMPLEX, 0.5, (235, 235, 235), 1)
         fps_txt = f"AI {hud['infer_fps']:.0f} + CAM {cam_fps:.0f} FPS"
