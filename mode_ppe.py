@@ -499,7 +499,13 @@ def main():
         print(f"[X] Cannot open source {args.source} - check camera cable / RTSP URL", flush=True)
         return
     cap.set(cv2.CAP_PROP_BUFFERSIZE, 1)  # never display stale buffered frames
-    print(f"[OK] Camera opened: {args.source} (+{time.time() - T0:.0f}s after click)", flush=True)
+    # ask for 720p: inference size is fixed, but the face-zoom crop reads the
+    # FULL-RES frame, so more capture pixels = more mask detail at 2m+.
+    cap.set(cv2.CAP_PROP_FRAME_WIDTH, 1280)
+    cap.set(cv2.CAP_PROP_FRAME_HEIGHT, 720)
+    _cw, _ch = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH)), int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
+    print(f"[OK] Camera opened: {args.source} ({_cw}x{_ch}) (+{time.time() - T0:.0f}s after click)",
+          flush=True)
 
     # Shared display state: main thread captures + draws at camera rate,
     # worker thread loads AI models, then runs inference behind at ~5 Hz.
@@ -693,10 +699,13 @@ def main():
 
                 violations = 0
                 all_bad = set()  # confirmed violation tags across everyone in view
+                mask_judged_any, glove_judged_any = False, False
                 for pbox, tid, pconf in persons:
                     ph = pbox[3] - pbox[1]
                     judge_mask = HAS_MASK and ph >= args.min_face_h
                     judge_glove = judge_gloves_live and ph >= args.min_glove_h
+                    mask_judged_any = mask_judged_any or judge_mask
+                    glove_judged_any = glove_judged_any or judge_glove
                     raw_tags, _ = judge_person(pbox, hats, nohats, vests, novests, gloves, nogloves,
                                                masks, nomasks, judge_mask, judge_glove,
                                                glove_absence_counts=glove_absence)
@@ -751,15 +760,16 @@ def main():
                             ok_visitors.add(int(tid))
                             warn_state.pop(int(tid), None)
 
-                # side status board: overall state per checked item (profile order)
+                # side status board: overall state per checked item (profile order).
+                # Too-far faces are idle ("--"), never a false green OK.
                 panel = []
-                for _key, _label, _bad in (("no_helmet", "HELMET", "NO HELMET"),
-                                           ("no_vest", "VEST", "NO VEST"),
-                                           ("no_mask", "MASK", "NO MASK"),
-                                           ("no_gloves", "GLOVES", "NO GLOVES")):
+                for _key, _label, _bad, _judged in (("no_helmet", "HELMET", "NO HELMET", True),
+                                                    ("no_vest", "VEST", "NO VEST", True),
+                                                    ("no_mask", "MASK", "NO MASK", mask_judged_any),
+                                                    ("no_gloves", "GLOVES", "NO GLOVES", glove_judged_any)):
                     if _key not in tally:
                         continue
-                    if not persons:
+                    if not persons or not _judged:
                         panel.append((_label, "idle"))
                     elif _bad in all_bad:
                         panel.append((_label, "bad"))
