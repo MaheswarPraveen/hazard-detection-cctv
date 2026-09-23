@@ -484,11 +484,19 @@ def main():
     }
 
     def infer_worker():
-        model, ids, HAS_MASK, HAS_GLOVES_MAIN, gmodel, gids, base = load_models(args, CHECKS)
+        # STAGED LOADING: primary first so masks go live fast (~20s); the slow
+        # 49MB gloves backup loads in background and joins when ready (~70s).
+        _gm_arg = args.gloves_model
+        args.gloves_model = ""
+        model, ids, HAS_MASK, HAS_GLOVES_MAIN, _, _, base = load_models(args, CHECKS)
+        args.gloves_model = _gm_arg
         print("[...] Warming up model (3 dummy frames)...", flush=True)
         for _ in range(3):
             model(np.zeros((480, 480, 3), dtype=np.uint8), verbose=False)
         print("[OK] Model hot.", flush=True)
+
+        want_gloves = ("gloves" in CHECKS) and not args.ignore_gloves and bool(_gm_arg)
+        gmodel, gids = None, {}
 
         today = datetime.now().strftime("%Y-%m-%d")
         visitors, ok_visitors = set(), set()
