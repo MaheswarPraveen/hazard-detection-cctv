@@ -125,8 +125,18 @@ python mode_zone.py --source "rtsp://username:password@192.168.1.100:554/stream"
 ### 4. Running PPE Compliance Verification
 
 ```bash
-python mode_ppe.py --source 0 --conf 0.4
+python mode_ppe.py --source 0 --conf 0.25 --imgsz 640
+# single-photo check without a camera (saves *_annotated.jpg):
+python mode_ppe.py --source live_ready.jpg --imgsz 640
+# gloves at a 2-3 m gate via backup weights (ppe_v8n has no glove classes):
+python mode_ppe.py --source 0 --gloves-model ppe_v8m.pt
 ```
+Detection notes: inference runs at the lowest per-class threshold (mask/glove
+~0.20) with larger 640px frames, person boxes are expanded for helmet-above-head
+association, warnings need 3 consecutive frames (no flicker), and mask/gloves are
+only judged close-up (small/far faces read FAR, not NO MASK). Yellow cloth masks
+and blue gloves outside the training colors may still need fine-tuning (see the
+FINE-TUNE NOTE at the bottom of `mode_ppe.py`).
 
 ### 5. Running the Web Console Dashboard
 
