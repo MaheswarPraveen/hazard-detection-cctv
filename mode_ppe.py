@@ -236,7 +236,7 @@ def run_image_test(args, model, ids, gmodel, gids):
                 nomasks.append(b)
     # optional gloves-only backup model
     if gmodel is not None and not args.ignore_gloves:
-        rg = gmodel(frame, conf=args.glove_conf, imgsz=args.imgsz, verbose=False)[0]
+        rg = gmodel(frame, conf=args.glove_conf, imgsz=args.glove_imgsz, verbose=False)[0]
         if rg.boxes is not None and len(rg.boxes) > 0:
             for box, c, cf in zip(rg.boxes.xyxy.cpu().numpy(), rg.boxes.cls.cpu().numpy().astype(int),
                                   rg.boxes.conf.cpu().numpy()):
@@ -310,6 +310,7 @@ def main():
     ap.add_argument("--ignore-mask", action="store_true", help="turn off mask checking (far-field cams)")
     ap.add_argument("--ignore-gloves", action="store_true", help="turn off glove checking")
     ap.add_argument("--glove-every", type=int, default=3, help="run 2nd gloves model every N frames (CPU saver)")
+    ap.add_argument("--glove-imgsz", type=int, default=320, help="inference size for gloves backup (320 is 3x faster than 640, fine at gate range)")
     ap.add_argument("--face-zoom", action=argparse.BooleanOptionalAction, default=True,
                     help="second close-up pass on face crop for tiny masks at 2m+ (use --no-face-zoom to disable)")
     ap.add_argument("--face-every", type=int, default=3, help="run face-zoom every N frames (CPU saver)")
@@ -439,7 +440,7 @@ def main():
         # gloves-only backup model (ignores its person/helmet outputs - that weight is blind there)
         if gmodel is not None and frame_n % args.glove_every == 0:
             try:
-                rg = gmodel(frame, conf=args.glove_conf, imgsz=args.imgsz, verbose=False)[0]
+                rg = gmodel(frame, conf=args.glove_conf, imgsz=args.glove_imgsz, verbose=False)[0]
                 gb, ngb = [], []
                 if rg.boxes is not None and len(rg.boxes) > 0:
                     for box, c, cf in zip(rg.boxes.xyxy.cpu().numpy(),
