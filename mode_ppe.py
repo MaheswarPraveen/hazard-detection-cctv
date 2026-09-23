@@ -228,6 +228,56 @@ def judge_person(pbox, hats, nohats, vests, novests, gloves, nogloves,
     return tags, (has_hat, has_vest, has_mask, has_gloves)
 
 
+# ---------------------------------------------------------------- model loading
+def load_models(args, checks):
+    """Load primary (+ optional gloves backup) weights. Nano takes ~10s,
+    ppe_v8m adds ~30s on CPU. The live window is already up meanwhile, so the
+    user sees video + a LOADING banner instead of a dead click."""
+    wpath = BASE / args.model if not Path(args.model).exists() else Path(args.model)
+    model = YOLO(str(wpath))
+    ids = resolve_ids(model)
+    has_mask = (ids["MASK"] is not None or ids["NO_MASK"] is not None) and not args.ignore_mask \
+        and "mask" in checks
+    has_gloves_main = (ids["GLOVES"] is not None or ids["NO_GLOVES"] is not None) \
+        and not args.ignore_gloves
+
+    gmodel, gids = None, {}
+    if args.gloves_model and not args.ignore_gloves and "gloves" in checks:
+        gpath = BASE / args.gloves_model if not Path(args.gloves_model).exists() else Path(args.gloves_model)
+        if gpath.exists():
+            gmodel = YOLO(str(gpath))
+            gids = resolve_ids(gmodel)
+            print(f"[INFO] gloves backup {gpath.name}: "
+                  f"GLOVES={gids['GLOVES']} NO_GLOVES={gids['NO_GLOVES']}", flush=True)
+            if gids["GLOVES"] is None and gids["NO_GLOVES"] is None:
+                print("[!] gloves-model has no glove classes - ignoring it", flush=True)
+                gmodel = None
+        else:
+            print(f"[!] --gloves-model {args.gloves_model} not found - gloves from primary model only",
+                  flush=True)
+
+    global BOX_COLORS
+    BOX_COLORS = {v: c for v, c in [
+        (ids["HARDHAT"], (0, 255, 0)), (ids["NO_HARDHAT"], (0, 0, 255)),
+        (ids["VEST"], (0, 255, 0)), (ids["NO_VEST"], (0, 0, 255)),
+        (ids["MASK"], (0, 255, 255)), (ids["NO_MASK"], (0, 165, 255)),
+        (ids["GLOVES"], (255, 0, 0)), (ids["NO_GLOVES"], (255, 0, 255)),
+    ] if v is not None}
+
+    print(f"[INFO] Model {wpath.name} classes: {model.names}", flush=True)
+    print(f"[INFO] ids HARDHAT={ids['HARDHAT']} NO_HARDHAT={ids['NO_HARDHAT']} VEST={ids['VEST']} "
+          f"NO_VEST={ids['NO_VEST']} PERSON={ids['PERSON']} GLOVES={ids['GLOVES']} "
+          f"NO_GLOVES={ids['NO_GLOVES']} MASK={ids['MASK']} NO_MASK={ids['NO_MASK']}", flush=True)
+    base = min_thresh(args, ids)
+    print(f"[INFO] thresholds base={base:.2f} person={args.person_conf:.2f} ppe={args.ppe_conf:.2f} "
+          f"mask={args.mask_conf:.2f} glove={args.glove_conf:.2f} smooth={args.smooth} imgsz={args.imgsz}",
+          flush=True)
+    if ids["GLOVES"] is None and gmodel is None and not args.ignore_gloves:
+        print("[INFO] primary model has no glove classes -> glove check OFF "
+              "(enable with --gloves-model ppe_v8m.pt at 2-3 m gate)", flush=True)
+    return model, ids, has_mask, has_gloves_main, gmodel, gids, base
+
+
 # ---------------------------------------------------------------- image test
 def run_image_test(args, model, ids, gmodel, gids, checks):
     img_path = Path(args.source)
