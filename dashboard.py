@@ -4,9 +4,12 @@ Start/stop Zone + PPE modes, view live stats, download CSVs, browse evidence.
 """
 import csv
 import json
+import os
+import signal
 import subprocess
 import sys
 import threading
+import time
 from functools import partial
 from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
@@ -26,6 +29,38 @@ MODES = {
                          "--glove-every", "12"]},
 }
 CAM_MODES = ("zone", "ppe_hv", "ppe_mg")  # share one camera: only one runs at a time
+LOCK_OF = {"zone": "zone.lock", "ppe_hv": "ppe_hv.lock", "ppe_mg": "ppe_mg.lock"}
+
+
+def kill_lock_owner(lock_name):
+    """Terminate a stray station process left behind by an older dashboard
+    (its lock file holds the PID). Returns True if something was killed."""
+    lock = BASE / lock_name
+    try:
+        pid = int(lock.read_text().strip())
+    except (OSError, ValueError):
+        return False
+    if pid == os.getpid():
+        return False
+    try:
+        os.kill(pid, 0)  # alive?
+    except OSError:
+        try:
+            lock.unlink()
+        except OSError:
+            pass
+        return False
+    try:
+        os.kill(pid, signal.SIGTERM)
+    except OSError:
+        return False
+    for _ in range(50):  # wait up to 5s for release
+        try:
+            os.kill(pid, 0)
+            time.sleep(0.1)
+        except OSError:
+            break
+    return True
 
 PAGE = """<!doctype html><html><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
@@ -210,6 +245,7 @@ class Handler(SimpleHTTPRequestHandler):
                     p = procs.get(other)
                     if p is not None and p.poll() is None:
                         p.terminate()
+            kill_lock_owner(LOCK_OF[mode])  # plus any orphan the dashboard forgot
             log = open(BASE / f"{mode}_dash.log", "ab")
             flags = 0
             if sys.platform == "win32":
@@ -231,6 +267,8 @@ class Handler(SimpleHTTPRequestHandler):
 
 
 if __name__ == "__main__":
+    for _m in CAM_MODES:  # clean up strays from a previous dashboard run
+        kill_lock_owner(LOCK_OF[_m])
     handler = partial(Handler, directory=str(BASE))
     srv = ThreadingHTTPServer(("127.0.0.1", PORT), handler)
     print(f"[OK] Dashboard at http://localhost:{PORT}")

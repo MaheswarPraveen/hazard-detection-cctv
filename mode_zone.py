@@ -5,6 +5,7 @@ Run: python mode_zone.py --source 0
 import argparse
 import csv
 import math
+import os
 import time
 from datetime import datetime
 from pathlib import Path
@@ -72,6 +73,24 @@ def main():
         model(_warm, verbose=False)
     print("[OK] Model hot.")
 
+    # single-instance guard: one camera, one holder.
+    _zlock = BASE / "zone.lock"
+    if _zlock.exists():
+        try:
+            _zold = int(_zlock.read_text().strip())
+        except ValueError:
+            _zold = None
+        _zalive = False
+        if _zold and _zold != os.getpid():
+            try:
+                os.kill(_zold, 0)
+                _zalive = True
+            except OSError:
+                _zalive = False
+        if _zalive:
+            print(f"[!] Another Zone_Alert (pid {_zold}) already holds the camera - exiting.")
+            return
+    _zlock.write_text(str(os.getpid()))
     cap = None
     for attempt in range(1, 4):
         cap = cv2.VideoCapture(src)
@@ -239,6 +258,10 @@ def main():
 
     cap.release()
     cv2.destroyAllWindows()
+    try:
+        _zlock.unlink()
+    except OSError:
+        pass
     print(f"[OK] Log: {csv_path} | entries run={entries_run} today={entries_today}")
 
 

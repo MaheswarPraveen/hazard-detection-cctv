@@ -30,6 +30,7 @@ still reads NO-Mask, the honest fix is fine-tuning nano on 50-100 yellow-mask
 photos (see bottom of this file). Same story for blue gloves (Phase 2).
 """
 import argparse
+import os
 import threading
 import time
 import traceback
@@ -428,6 +429,24 @@ def main():
 
     # camera FIRST: the window appears in ~2s; heavy AI models (~45s on CPU)
     # load inside the worker meanwhile, behind a LOADING banner.
+    # single-instance guard: one camera, one holder per profile.
+    lock_path = BASE / f"ppe_{TAG}.lock"
+    if lock_path.exists():
+        try:
+            _old = int(lock_path.read_text().strip())
+        except ValueError:
+            _old = None
+        _alive = False
+        if _old and _old != os.getpid():
+            try:
+                os.kill(_old, 0)
+                _alive = True
+            except OSError:
+                _alive = False
+        if _alive:
+            print(f"[!] Another PPE_{TAG} (pid {_old}) already holds the camera - exiting.", flush=True)
+            return
+    lock_path.write_text(str(os.getpid()))
     src = int(args.source) if str(args.source).isdigit() else str(args.source)
     cap = None
     for attempt in range(1, 4):
@@ -764,6 +783,10 @@ def main():
     worker.join(timeout=8)
     cap.release()
     cv2.destroyAllWindows()
+    try:
+        lock_path.unlink()
+    except OSError:
+        pass
     print("[OK] PPE session ended.", flush=True)
 
 
