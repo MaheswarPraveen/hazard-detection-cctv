@@ -134,6 +134,44 @@ def draw_ppe_box(frame, box, cls_idx, conf_val, names):
                 cv2.FONT_HERSHEY_SIMPLEX, 0.45, color, 1)
 
 
+def face_zoom_boxes(frame, persons, model, ids, args):
+    """Second close-up pass: crop each head region, re-run nano on the crop.
+    A mask that is 40px in full frame becomes ~150px in the crop - this is what
+    makes 2m+ mask detection possible. Returns (masks, nomasks) in frame coords
+    and draws them. Boxes come back in crop-pixel coords, so just add offset."""
+    out_masks, out_nomasks = [], []
+    if ids["MASK"] is None and ids["NO_MASK"] is None:
+        return out_masks, out_nomasks
+    fh, fw = frame.shape[:2]
+    for pbox, _tid, _pc in persons:
+        x1, y1, x2, y2 = (float(v) for v in pbox)
+        ph, pw = y2 - y1, x2 - x1
+        if ph < args.min_face_h:
+            continue
+        hx1, hy1 = max(0, int(x1 - 0.15 * pw)), max(0, int(y1 - 0.15 * ph))
+        hx2, hy2 = min(fw, int(x2 + 0.15 * pw)), min(fh, int(y1 + 0.42 * ph))
+        if hx2 - hx1 < 40 or hy2 - hy1 < 40:
+            continue
+        crop = frame[hy1:hy2, hx1:hx2]
+        try:
+            rz = model(crop, conf=args.mask_conf, imgsz=args.face_imgsz, verbose=False)[0]
+        except Exception:
+            continue
+        if rz.boxes is None or len(rz.boxes) == 0:
+            continue
+        for box, c, cf in zip(rz.boxes.xyxy.cpu().numpy(), rz.boxes.cls.cpu().numpy().astype(int),
+                              rz.boxes.conf.cpu().numpy()):
+            if c not in (ids["MASK"], ids["NO_MASK"]) or float(cf) < args.mask_conf:
+                continue
+            b = [float(box[0]) + hx1, float(box[1]) + hy1, float(box[2]) + hx1, float(box[3]) + hy1]
+            (out_masks if c == ids["MASK"] else out_nomasks).append(b)
+            x1b, y1b, x2b, y2b = map(int, b)
+            cv2.rectangle(frame, (x1b, y1b), (x2b, y2b), (0, 255, 255), 1)
+            cv2.putText(frame, f"{model.names[c]} {float(cf):.2f} (zoom)", (x1b, max(0, y1b - 5)),
+                        cv2.FONT_HERSHEY_SIMPLEX, 0.45, (0, 255, 255), 1)
+    return out_masks, out_nomasks
+
+
 def judge_person(pbox, hats, nohats, vests, novests, gloves, nogloves,
                  masks, nomasks, judge_mask, judge_gloves, glove_absence_counts=True):
     """Return (tags, detail). Absence alone only counts when close + persistent
@@ -214,6 +252,11 @@ def run_image_test(args, model, ids, gmodel, gids):
     print(f"       raw kept: person={len(persons)} hat={len(hats)} nohat={len(nohats)} "
           f"vest={len(vests)} novest={len(novests)} mask={len(masks)} nomask={len(nomasks)} "
           f"gloves={len(gloves)} nogloves={len(nogloves)}")
+    if args.face_zoom and persons and not args.ignore_mask:
+        zm, zn = face_zoom_boxes(frame, [(b, -1, cf) for b, cf in persons], model, ids, args)
+        masks += zm
+        nomasks += zn
+        print(f"       face-zoom added: mask={len(zm)} nomask={len(zn)}")
     if not persons:
         print("[TEST] NO Person box kept -> try --person-conf 0.25 --imgsz 640, move to 2m, center chest-up.")
     for i, (pbox, pconf) in enumerate(persons):
@@ -267,6 +310,10 @@ def main():
     ap.add_argument("--ignore-mask", action="store_true", help="turn off mask checking (far-field cams)")
     ap.add_argument("--ignore-gloves", action="store_true", help="turn off glove checking")
     ap.add_argument("--glove-every", type=int, default=3, help="run 2nd gloves model every N frames (CPU saver)")
+    ap.add_argument("--face-zoom", action=argparse.BooleanOptionalAction, default=True,
+                    help="second close-up pass on face crop for tiny masks at 2m+ (use --no-face-zoom to disable)")
+    ap.add_argument("--face-every", type=int, default=3, help="run face-zoom every N frames (CPU saver)")
+    ap.add_argument("--face-imgsz", type=int, default=320, help="inference size for the face crop")
     args = ap.parse_args()
 
     wpath = BASE / args.model if not Path(args.model).exists() else Path(args.model)
@@ -348,6 +395,7 @@ def main():
             if len(parts) == 2 and parts[0] in tally:
                 tally[parts[0]] = int(parts[1])
     last_glove_boxes = ([], [])  # cached (gloves, nogloves) from backup model
+    last_face_boxes = ([], [])  # cached (masks, nomasks) from face-zoom pass
     frame_n = 0
     alarm_on, last_siren = False, 0.0
     fps_t0, fps_n, fps = time.time(), 0, 0.0
@@ -410,6 +458,16 @@ def main():
             for b in gb + ngb:  # blue overlay so backup boxes are visible
                 x1, y1, x2, y2 = map(int, b)
                 cv2.rectangle(frame, (x1, y1), (x2, y2), (255, 0, 0), 1)
+
+        # face-zoom second look for tiny masks (the 2m+ fix)
+        if args.face_zoom and not args.ignore_mask and persons and frame_n % args.face_every == 0:
+            try:
+                last_face_boxes = face_zoom_boxes(frame, persons, model, ids, args)
+            except Exception as e:
+                print(f"[!] face-zoom frame skipped: {e}")
+        if args.face_zoom and not args.ignore_mask:
+            masks = list(masks) + list(last_face_boxes[0])
+            nomasks = list(nomasks) + list(last_face_boxes[1])
 
         violations = 0
         glove_absence_live = HAS_GLOVES_MAIN  # backup-only gloves: explicit NO-Gloves only

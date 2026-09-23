@@ -201,7 +201,8 @@ class Handler(SimpleHTTPRequestHandler):
             if sys.platform == "win32":
                 flags = 0x00000008 | 0x00000200  # DETACHED_PROCESS | NEW_PROCESS_GROUP
             procs[mode] = subprocess.Popen(
-                [sys.executable, MODES[mode]["file"], "--source", "0", "--camera", "CAM01"],
+                [sys.executable, MODES[mode]["file"], "--source", "0", "--camera", "CAM01"]
+                + (["--gloves-model", "ppe_v8m.pt", "--glove-every", "5"] if mode == "ppe" else []),
                 cwd=BASE, stdout=log, stderr=subprocess.STDOUT,
                 stdin=subprocess.DEVNULL, close_fds=True,
                 creationflags=flags)
