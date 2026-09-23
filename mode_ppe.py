@@ -209,7 +209,7 @@ def judge_person(pbox, hats, nohats, vests, novests, gloves, nogloves,
 
 
 # ---------------------------------------------------------------- image test
-def run_image_test(args, model, ids, gmodel, gids):
+def run_image_test(args, model, ids, gmodel, gids, checks):
     img_path = Path(args.source)
     frame = cv2.imread(str(img_path))
     if frame is None:
@@ -271,18 +271,18 @@ def run_image_test(args, model, ids, gmodel, gids):
         print("[TEST] NO Person box kept -> try --person-conf 0.25 --imgsz 640, move to 2m, center chest-up.")
     for i, (pbox, pconf) in enumerate(persons):
         ph = pbox[3] - pbox[1]
-        judge_mask = not args.ignore_mask and "mask" in CHECKS \
+        judge_mask = not args.ignore_mask and "mask" in checks \
             and (ids["MASK"] is not None or ids["NO_MASK"] is not None) \
             and ph >= args.min_face_h
-        judge_gloves = not args.ignore_gloves and "gloves" in CHECKS \
+        judge_gloves = not args.ignore_gloves and "gloves" in checks \
             and (gmodel is not None or ids["GLOVES"] is not None) \
             and ph >= args.min_glove_h
         tags, _ = judge_person(pbox, hats, nohats, vests, novests, gloves, nogloves,
                                masks, nomasks, judge_mask, judge_gloves,
                                glove_absence_counts=(ids["GLOVES"] is not None))
-        if "helmet" not in CHECKS:
+        if "helmet" not in checks:
             tags = [t for t in tags if t != "NO HELMET"]
-        if "vest" not in CHECKS:
+        if "vest" not in checks:
             tags = [t for t in tags if t != "NO VEST"]
         x1, y1, x2, y2 = map(int, pbox)
         color = (0, 255, 0) if not tags else (0, 0, 255)
@@ -389,7 +389,7 @@ def main():
 
     # single-photo test path (no camera needed)
     if Path(str(args.source)).suffix.lower() in IMG_EXTS and Path(str(args.source)).exists():
-        run_image_test(args, model, ids, gmodel, gids)
+        run_image_test(args, model, ids, gmodel, gids, CHECKS)
         return
 
     print("[...] Warming up model (3 dummy frames)...", flush=True)
