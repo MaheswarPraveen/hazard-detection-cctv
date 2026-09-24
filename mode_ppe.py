@@ -855,6 +855,10 @@ def main():
                                                     ("no_mask", "MASK", "NO MASK", mask_judged_any),
                                                     ("no_gloves", "GLOVES", "NO GLOVES", glove_judged_any)):
                     if _key not in tally:
+                        # vg profile with no glove-capable weights yet: show the
+                        # row as idle ("--") so the station promise stays visible
+                        if _key == "no_gloves" and "gloves" in CHECKS:
+                            panel.append((_label, "idle"))
                         continue
                     if _key == "no_gloves" and not HAS_GLOVES_MAIN:
                         if _bad in all_bad:
