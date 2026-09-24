@@ -26,7 +26,7 @@ MODES = {
     "ppe_mh": {"file": "mode_ppe.py", "name": "PPE Mask + Helmet", "desc": "Face-mask & hardhat station",
                "extra": ["--checks", "helmet,mask", "--silent"]},
     "ppe_vg": {"file": "mode_ppe.py", "name": "PPE Vest + Gloves", "desc": "Safety-vest & blue-gloves gate (2-3 m)",
-               "extra": ["--checks", "vest,gloves", "--imgsz", "416", "--silent"]},
+               "extra": ["--checks", "vest,gloves", "--imgsz", "416", "--silent", "--skin"]},
     # NOTE: ppe_v8m.pt proved stone-blind on this feed (zero boxes at conf 0.05
     # across all scenes) so it ships DISABLED. Gloves come back with fine-tuned
     # weights: add "--gloves-model best.pt" above when they exist.
