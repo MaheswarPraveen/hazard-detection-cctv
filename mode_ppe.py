@@ -375,13 +375,13 @@ def load_models(args, checks):
           f"mask={args.mask_conf:.2f} glove={args.glove_conf:.2f} smooth={args.smooth} imgsz={args.imgsz}",
           flush=True)
     if ids["GLOVES"] is None and gmodel is None and not args.ignore_gloves:
-        _skin_will = ("gloves" in checks) and not args.no_skin
+        _skin_will = ("gloves" in checks) and args.skin
         if _skin_will:
             print("[INFO] no glove classes in weights -> skin-based bare-hand fallback "
                   "active (red on bare skin, idle otherwise)", flush=True)
         else:
-            print("[INFO] primary model has no glove classes -> glove check OFF "
-                  "(enable with --gloves-model ppe_v8m.pt at 2-3 m gate)", flush=True)
+            print("[INFO] no glove classes in weights -> gloves idle until fine-tuned "
+                  "weights arrive (--gloves-model best.pt) or --skin is passed", flush=True)
     return model, ids, has_mask, has_gloves_main, gmodel, gids, base
 
 
