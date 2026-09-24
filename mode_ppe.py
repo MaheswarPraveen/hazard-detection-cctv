@@ -574,6 +574,8 @@ def main():
                     help="contrary frames before a LOCKED verdict flips (slow to un-warn: kills YES/NO flicker)")
     ap.add_argument("--min-face-h", type=int, default=130, help="px person height below which mask is NOT judged (FAR)")
     ap.add_argument("--min-glove-h", type=int, default=180, help="px person height below which gloves are NOT judged (FAR)")
+    ap.add_argument("--max-glove-h", type=int, default=950,
+                    help="px person height above which gloves are NOT judged (TOO CLOSE: step back to ~2m)")
     ap.add_argument("--ignore-mask", action="store_true", help="turn off mask checking (far-field cams)")
     ap.add_argument("--ignore-gloves", action="store_true", help="turn off glove checking")
     ap.add_argument("--skin", action="store_true",
@@ -857,7 +859,8 @@ def main():
                     try:
                         sb = []
                         for (pbox, _tid, _pc) in persons:
-                            if pbox[3] - pbox[1] < args.min_glove_h:
+                            _ph = pbox[3] - pbox[1]
+                            if not (args.min_glove_h <= _ph <= args.max_glove_h):
                                 continue
                             sb += bare_hand_boxes(grab, pbox, face_boxes)
                         last_skin = sb
@@ -871,7 +874,8 @@ def main():
                     try:
                         bb = []
                         for (pbox, _tid, _pc) in persons:
-                            if pbox[3] - pbox[1] < args.min_glove_h:
+                            _ph = pbox[3] - pbox[1]
+                            if not (args.min_glove_h <= _ph <= args.max_glove_h):
                                 continue
                             bb += blue_glove_boxes(grab, pbox, face_boxes, blue_spec)
                         last_blue = bb
@@ -911,7 +915,7 @@ def main():
                 for pbox, tid, pconf in persons:
                     ph = pbox[3] - pbox[1]
                     judge_mask = HAS_MASK and ph >= args.min_face_h
-                    judge_glove = judge_gloves_live and ph >= args.min_glove_h
+                    judge_glove = judge_gloves_live and args.min_glove_h <= ph <= args.max_glove_h
                     mask_judged_any = mask_judged_any or judge_mask
                     glove_judged_any = glove_judged_any or judge_glove
                     raw_tags, _, _confs = judge_person(pbox, hats, nohats, vests, novests, gloves, nogloves,
