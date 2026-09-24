@@ -17,6 +17,7 @@ from urllib.parse import urlparse, parse_qs
 
 BASE = Path(__file__).parent
 PORT = 8000
+CAM_SOURCE = "1"  # webcam index or RTSP URL (flip to "0" for the built-in cam)
 procs = {}  # mode -> Popen
 
 MODES = {
@@ -269,7 +270,7 @@ class Handler(SimpleHTTPRequestHandler):
             if sys.platform == "win32":
                 flags = 0x00000008 | 0x00000200  # DETACHED_PROCESS | NEW_PROCESS_GROUP
             procs[mode] = subprocess.Popen(
-                [sys.executable, "-u", MODES[mode]["file"], "--source", "0", "--camera", "CAM01"]
+                [sys.executable, "-u", MODES[mode]["file"], "--source", CAM_SOURCE, "--camera", "CAM01"]
                 + MODES[mode].get("extra", []),
                 cwd=BASE, stdout=log, stderr=subprocess.STDOUT,
                 stdin=subprocess.DEVNULL, close_fds=True,
