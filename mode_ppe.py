@@ -273,9 +273,9 @@ def bare_hand_boxes(frame, pbox, face_boxes):
                        np.array([255, 173, 127], dtype=np.uint8))
     h, w = skin.shape[:2]
     skin[:int(h * 0.30), :] = 0  # head zone: never hands
-    for (fx1, fy1, fx2, fy2) in face_boxes:  # face + neck margin excluded
+    for (fx1, fy1, fx2, fy2) in face_boxes:  # face + full neck column excluded
         ex1, ex2 = max(0, int(fx1 - x1 - 10)), min(w, int(fx2 - x1 + 10))
-        ey1, ey2 = max(0, int(fy1 - y1 - 10)), min(h, int(fy2 - y1 + int(max(0.0, fy2 - fy1) * 0.6)))
+        ey1, ey2 = max(0, int(fy1 - y1 - 10)), min(h, int(fy2 - y1 + int(max(0.0, fy2 - fy1) * 1.0)))
         if ex2 > ex1 and ey2 > ey1:
             skin[ey1:ey2, ex1:ex2] = 0
     skin = cv2.morphologyEx(skin, cv2.MORPH_OPEN, np.ones((3, 3), np.uint8))
