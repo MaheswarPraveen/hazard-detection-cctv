@@ -239,6 +239,23 @@ def face_zoom_boxes(frame, persons, model, ids, args):
     return out_masks, out_nomasks
 
 
+def glove_plausible(gbox, pbox):
+    """Hands are small and below the head. A glove box only counts as worn if:
+    area <= 12% of the person box (rejects blue shirts/tarps/walls) and its
+    center sits below the top 20% of the person (rejects caps/hair-nets).
+    This keeps color-blob false hits from convicting; it cannot make a blind
+    model SEE unseen glove colors - that needs fine-tuning."""
+    px1, py1, px2, py2 = (float(v) for v in pbox)
+    pw, ph = max(1.0, px2 - px1), max(1.0, py2 - py1)
+    ga = max(0.0, (gbox[2] - gbox[0])) * max(0.0, (gbox[3] - gbox[1]))
+    if ga > 0.12 * pw * ph:
+        return False
+    cx, cy = (gbox[0] + gbox[2]) / 2, (gbox[1] + gbox[3]) / 2
+    if cy < py1 + 0.20 * ph:
+        return False
+    return True
+
+
 def judge_person(pbox, hats, nohats, vests, novests, gloves, nogloves,
                  masks, nomasks, judge_mask, judge_gloves, glove_absence_counts=True):
     """Return (tags, detail, confs). Lists hold (box, conf); absence alone only
@@ -248,10 +265,12 @@ def judge_person(pbox, hats, nohats, vests, novests, gloves, nogloves,
     glove_absence_counts=False when gloves come only from the backup model
     (its recall is poor, so absence means 'can't tell', not 'no gloves')."""
     _assoc = lambda items: [(b, cf) for b, cf in items if associated(b, pbox)]
+    _gassoc = lambda items: [(b, cf) for b, cf in items
+                             if associated(b, pbox) and glove_plausible(b, pbox)]
     a_hats, a_nohats = _assoc(hats), _assoc(nohats)
     a_vests, a_novests = _assoc(vests), _assoc(novests)
     a_masks, a_nomasks = _assoc(masks), _assoc(nomasks)
-    a_gloves, a_nogloves = _assoc(gloves), _assoc(nogloves)
+    a_gloves, a_nogloves = _gassoc(gloves), _gassoc(nogloves)
     has_hat, flag_nohat = _side(a_hats, a_nohats)
     has_vest, flag_novest = _side(a_vests, a_novests)
     has_mask, flag_nomask = _side(a_masks, a_nomasks)
