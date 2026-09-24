@@ -1095,28 +1095,36 @@ def main():
             continue
         dead_n = 0
         with shared["lock"]:
-            shared["raw"] = frame
+            shared["raw"] = frame  # full-res for the AI crops
             panel = list(shared["panel"])
             hud = shared["hud"]
             hud_tally = dict(hud["tally"])
             ready = shared["models_ready"]
+        # display copy: capped at 960 wide so 1080p doesn't make a giant window.
+        # Overlay metrics scale with display height (fs=1 at 480p).
+        fh0, fw0 = frame.shape[:2]
+        if fw0 > 960:
+            frame = cv2.resize(frame, (960, int(fh0 * 960 / fw0)))
         fh, fw = frame.shape[:2]
+        fs = fh / 480.0
+        _fs = lambda base: base * fs
+        _th = lambda base: max(1, int(round(base * fs)))
         if not ready:  # models still loading: live video + banner, AI states pop in later
-            cv2.rectangle(frame, (8, 88), (330, 118), (25, 25, 25), -1)
-            cv2.putText(frame, "LOADING AI MODELS...", (16, 109),
-                        cv2.FONT_HERSHEY_SIMPLEX, 0.6, (255, 255, 255), 2)
+            cv2.rectangle(frame, (8, int(88 * fs)), (int(330 * fs), int(118 * fs)), (25, 25, 25), -1)
+            cv2.putText(frame, "LOADING AI MODELS...", (16, int(109 * fs)),
+                        cv2.FONT_HERSHEY_SIMPLEX, _fs(0.6), (255, 255, 255), _th(2))
         v = hud["violations"]
         pill_color = (0, 0, 210) if v > 0 else (0, 170, 0)
-        cv2.rectangle(frame, (8, 8), (248, 38), pill_color, -1)
-        cv2.circle(frame, (26, 23), 6, (255, 255, 255), -1)
-        cv2.putText(frame, "WARNING" if v > 0 else "ALL COMPLIANT", (40, 28),
-                    cv2.FONT_HERSHEY_SIMPLEX, 0.6, (255, 255, 255), 2)
-        fh, fw = frame.shape[:2]
+        cv2.rectangle(frame, (8, 8), (int(248 * fs), int(38 * fs)), pill_color, -1)
+        cv2.circle(frame, (int(26 * fs), int(23 * fs)), _th(6), (255, 255, 255), -1)
+        cv2.putText(frame, "WARNING" if v > 0 else "ALL COMPLIANT", (int(40 * fs), int(28 * fs)),
+                    cv2.FONT_HERSHEY_SIMPLEX, _fs(0.6), (255, 255, 255), _th(2))
         # bottom status bar: one dark strip, dot + LABEL + YES/NO per item.
         # green = worn, red = missing, gray = nobody in view. Tallies live on
         # the dashboard, not on the video.
-        cv2.rectangle(frame, (0, fh - 32), (fw, fh), (20, 20, 20), -1)
-        bx = 12
+        _bh = int(32 * fs)
+        cv2.rectangle(frame, (0, fh - _bh), (fw, fh), (20, 20, 20), -1)
+        bx = int(12 * fs)
         for (plabel, state) in panel:
             if state == "ok":
                 dot, stxt, scol = (0, 200, 0), "YES", (0, 210, 0)
@@ -1124,21 +1132,21 @@ def main():
                 dot, stxt, scol = (0, 0, 255), "NO", (0, 0, 255)
             else:
                 dot, stxt, scol = (130, 130, 130), "--", (150, 150, 150)
-            cv2.circle(frame, (bx + 6, fh - 16), 6, dot, -1)
-            cv2.putText(frame, plabel, (bx + 17, fh - 11),
-                        cv2.FONT_HERSHEY_SIMPLEX, 0.5, (235, 235, 235), 1)
-            (tw, _th), _ = cv2.getTextSize(plabel, cv2.FONT_HERSHEY_SIMPLEX, 0.5, 1)
-            sx = bx + 17 + tw + 8
-            cv2.putText(frame, stxt, (sx, fh - 11),
-                        cv2.FONT_HERSHEY_SIMPLEX, 0.5, scol, 1)
-            (tws, _ths), _ = cv2.getTextSize(stxt, cv2.FONT_HERSHEY_SIMPLEX, 0.5, 1)
-            bx = sx + tws + 24
-        cv2.putText(frame, f"{hud['persons']} in view", (bx, fh - 11),
-                    cv2.FONT_HERSHEY_SIMPLEX, 0.5, (235, 235, 235), 1)
+            cv2.circle(frame, (int(bx + 6 * fs), fh - _bh // 2), _th(6), dot, -1)
+            cv2.putText(frame, plabel, (int(bx + 17 * fs), fh - int(11 * fs)),
+                        cv2.FONT_HERSHEY_SIMPLEX, _fs(0.5), (235, 235, 235), _th(1))
+            (tw, _thx), _ = cv2.getTextSize(plabel, cv2.FONT_HERSHEY_SIMPLEX, _fs(0.5), _th(1))
+            sx = bx + 17 * fs + tw + 8 * fs
+            cv2.putText(frame, stxt, (int(sx), fh - int(11 * fs)),
+                        cv2.FONT_HERSHEY_SIMPLEX, _fs(0.5), scol, _th(1))
+            (tws, _ths), _ = cv2.getTextSize(stxt, cv2.FONT_HERSHEY_SIMPLEX, _fs(0.5), _th(1))
+            bx = int(sx + tws + 24 * fs)
+        cv2.putText(frame, f"{hud['persons']} in view", (int(bx), fh - int(11 * fs)),
+                    cv2.FONT_HERSHEY_SIMPLEX, _fs(0.5), (235, 235, 235), _th(1))
         fps_txt = f"AI {hud['infer_fps']:.0f} + CAM {cam_fps:.0f} FPS"
-        (twf, _thf), _ = cv2.getTextSize(fps_txt, cv2.FONT_HERSHEY_SIMPLEX, 0.5, 1)
-        cv2.putText(frame, fps_txt, (fw - twf - 12, fh - 11),
-                    cv2.FONT_HERSHEY_SIMPLEX, 0.5, (160, 160, 160), 1)
+        (twf, _thf), _ = cv2.getTextSize(fps_txt, cv2.FONT_HERSHEY_SIMPLEX, _fs(0.5), _th(1))
+        cv2.putText(frame, fps_txt, (int(fw - twf - 12 * fs), fh - int(11 * fs)),
+                    cv2.FONT_HERSHEY_SIMPLEX, _fs(0.5), (160, 160, 160), _th(1))
 
         now2 = time.time()
         ctn += 1
