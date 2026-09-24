@@ -24,10 +24,10 @@ MODES = {
     "zone": {"file": "mode_zone.py", "name": "Zone Alert", "desc": "Restricted danger-zone intrusion alarm",
               "extra": []},
     "ppe_mh": {"file": "mode_ppe.py", "name": "PPE Mask + Helmet", "desc": "Face-mask & hardhat station",
-               "extra": ["--checks", "helmet,mask"]},
+               "extra": ["--checks", "helmet,mask", "--silent"]},
     "ppe_vg": {"file": "mode_ppe.py", "name": "PPE Vest + Gloves", "desc": "Safety-vest & blue-gloves gate (2-3 m)",
-               "extra": ["--checks", "vest,gloves", "--imgsz", "416", "--gloves-model", "ppe_v8m.pt",
-                         "--glove-every", "12"]},
+               "extra": ["--checks", "vest,gloves", "--imgsz", "416", "--silent",
+                         "--gloves-model", "ppe_v8m.pt", "--glove-every", "12"]},
 }
 CAM_MODES = ("zone", "ppe_mh", "ppe_vg")  # share one camera: only one runs at a time
 LOCK_OF = {"zone": "zone.lock", "ppe_mh": "ppe_mh.lock", "ppe_vg": "ppe_vg.lock"}

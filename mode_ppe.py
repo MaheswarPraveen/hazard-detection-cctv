@@ -455,6 +455,7 @@ def main():
     ap.add_argument("--min-glove-h", type=int, default=180, help="px person height below which gloves are NOT judged (FAR)")
     ap.add_argument("--ignore-mask", action="store_true", help="turn off mask checking (far-field cams)")
     ap.add_argument("--ignore-gloves", action="store_true", help="turn off glove checking")
+    ap.add_argument("--silent", action="store_true", help="no siren sound - display only")
     ap.add_argument("--glove-every", type=int, default=8, help="run 2nd gloves model every N inferences (CPU saver)")
     ap.add_argument("--glove-imgsz", type=int, default=320, help="inference size for gloves backup (320 is 3x faster than 640, fine at gate range)")
     ap.add_argument("--face-zoom", action=argparse.BooleanOptionalAction, default=True,
@@ -847,7 +848,7 @@ def main():
                     perf_t0 = now
 
                 if violations > 0:
-                    if winsound is not None and ALARM_WAV.exists():
+                    if not args.silent and winsound is not None and ALARM_WAV.exists():
                         if (not alarm_on) or (now - last_siren > 4.0):
                             winsound.PlaySound(str(ALARM_WAV),
                                                winsound.SND_FILENAME | winsound.SND_ASYNC | winsound.SND_LOOP)
@@ -855,7 +856,7 @@ def main():
                                 print("[ALARM] siren ON", flush=True)
                             last_siren, alarm_on = now, True
                 else:
-                    if alarm_on and winsound is not None:
+                    if alarm_on and not args.silent and winsound is not None:
                         winsound.PlaySound(None, winsound.SND_PURGE)
                         print("[ALARM] siren OFF", flush=True)
                         alarm_on = False
