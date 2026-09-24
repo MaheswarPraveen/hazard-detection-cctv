@@ -626,6 +626,7 @@ def main():
         tracker_cfg = str(TRACKER_YAML) if TRACKER_YAML.exists() else "bytetrack.yaml"
         last_glove = []  # cached [(box, conf, cls)] from backup model
         last_face = ([], [])  # cached ([(box, conf)], [(box, conf)]) from face-zoom
+        glove_mem = {"has": 0, "flag": 0}  # countdowns: glove evidence seen recently
         frame_n = 0
         alarm_on, last_siren = False, 0.0
         it0, itn, infer_fps = time.time(), 0, 0.0
@@ -747,6 +748,7 @@ def main():
                 violations = 0
                 all_bad = set()  # confirmed violation tags across everyone in view
                 mask_judged_any, glove_judged_any = False, False
+                g_has_any, g_flag_any = False, False  # instant glove evidence, any person
                 for pbox, tid, pconf in persons:
                     ph = pbox[3] - pbox[1]
                     judge_mask = HAS_MASK and ph >= args.min_face_h
@@ -756,6 +758,11 @@ def main():
                     raw_tags, _, _confs = judge_person(pbox, hats, nohats, vests, novests, gloves, nogloves,
                                                masks, nomasks, judge_mask, judge_glove,
                                                glove_absence_counts=glove_absence)
+                    if judge_glove:  # close enough to read hands: record what was seen
+                        if _confs["gloves"][0] > 0:
+                            g_has_any = True
+                        if _confs["gloves"][1] > 0:
+                            g_flag_any = True
                     if "helmet" not in CHECKS:  # this station doesn't judge helmets
                         raw_tags = [t for t in raw_tags if t != "NO HELMET"]
                     if "vest" not in CHECKS:  # this station doesn't judge vests
@@ -831,12 +838,31 @@ def main():
 
                 # side status board: overall state per checked item (profile order).
                 # Too-far faces are idle ("--"), never a false green OK.
+                # Backup-model gloves get honest three-state: the model recall is
+                # too poor for absence to mean anything, so YES needs a glove
+                # actually seen in the last ~second, else "--".
+                if g_has_any:
+                    glove_mem["has"] = 5
+                else:
+                    glove_mem["has"] = max(0, glove_mem["has"] - 1)
+                if g_flag_any:
+                    glove_mem["flag"] = 5
+                else:
+                    glove_mem["flag"] = max(0, glove_mem["flag"] - 1)
                 panel = []
                 for _key, _label, _bad, _judged in (("no_helmet", "HELMET", "NO HELMET", True),
                                                     ("no_vest", "VEST", "NO VEST", True),
                                                     ("no_mask", "MASK", "NO MASK", mask_judged_any),
                                                     ("no_gloves", "GLOVES", "NO GLOVES", glove_judged_any)):
                     if _key not in tally:
+                        continue
+                    if _key == "no_gloves" and not HAS_GLOVES_MAIN:
+                        if _bad in all_bad:
+                            panel.append((_label, "bad"))
+                        elif glove_mem["has"] > 0:
+                            panel.append((_label, "ok"))
+                        else:
+                            panel.append((_label, "idle"))
                         continue
                     if not persons or not _judged:
                         panel.append((_label, "idle"))
