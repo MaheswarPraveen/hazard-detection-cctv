@@ -30,6 +30,7 @@ still reads NO-Mask, the honest fix is fine-tuning nano on 50-100 yellow-mask
 photos (see bottom of this file). Same story for blue gloves (Phase 2).
 """
 import argparse
+import json
 import os
 import subprocess
 import threading
@@ -291,6 +292,46 @@ def bare_hand_boxes(frame, pbox, face_boxes):
             continue
         out.append(([float(x1 + bx), float(y1 + by),
                      float(x1 + bx + bw2), float(y1 + by + bh2)], 0.90))
+    return out
+
+
+def blue_glove_boxes(frame, pbox, face_boxes, spec):
+    """Calibrated-color glove detection (see calibrate_glove.py): YOUR sampled
+    blue, in hand zones only, becomes (box, 0.85) positive evidence through the
+    normal association / arbitration / lock pipeline - real green YES without
+    any training. Same zone/exclusion/shape gates as the skin fallback, so
+    blue walls and shirts outside hand zones never count."""
+    x1, y1, x2, y2 = (int(v) for v in pbox)
+    fh, fw = frame.shape[:2]
+    x1, y1, x2, y2 = max(0, x1), max(0, y1), min(fw, x2), min(fh, y2)
+    if x2 - x1 < 30 or y2 - y1 < 60:
+        return []
+    crop = frame[y1:y2, x1:x2]
+    hsv = cv2.cvtColor(crop, cv2.COLOR_BGR2HSV)
+    lo = np.array([max(0.0, spec["h"] - 10), max(0.0, spec["s"] - 60), max(0.0, spec["v"] - 60)],
+                  dtype=np.uint8)
+    hi = np.array([min(179.0, spec["h"] + 10), 255, 255], dtype=np.uint8)
+    blue = cv2.inRange(hsv, lo, hi)
+    h, w = blue.shape[:2]
+    blue[:int(h * 0.30), :] = 0  # head zone: never hands
+    for (fx1, fy1, fx2, fy2) in face_boxes:  # face + full neck column excluded
+        ex1, ex2 = max(0, int(fx1 - x1 - 10)), min(w, int(fx2 - x1 + 10))
+        ey1, ey2 = max(0, int(fy1 - y1 - 10)), min(h, int(fy2 - y1 + int(max(0.0, fy2 - fy1) * 1.0)))
+        if ex2 > ex1 and ey2 > ey1:
+            blue[ey1:ey2, ex1:ex2] = 0
+    blue = cv2.morphologyEx(blue, cv2.MORPH_OPEN, np.ones((3, 3), np.uint8))
+    cnts, _ = cv2.findContours(blue, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+    out, pa = [], max(1.0, float(w * h))
+    for c in cnts:
+        area = cv2.contourArea(c)
+        if not (0.005 * pa <= area <= 0.08 * pa):
+            continue
+        bx, by, bw2, bh2 = cv2.boundingRect(c)
+        ar = bw2 / max(1, bh2)
+        if not (0.4 <= ar <= 2.5):  # compact blobs only, not sleeves/walls
+            continue
+        out.append(([float(x1 + bx), float(y1 + by),
+                     float(x1 + bx + bw2), float(y1 + by + bh2)], 0.85))
     return out
 
 
@@ -677,6 +718,16 @@ def main():
         last_glove = []  # cached [(box, conf, cls)] from backup model
         last_face = ([], [])  # cached ([(box, conf)], [(box, conf)]) from face-zoom
         last_skin = []  # cached [(box, 0.90)] bare-hand pseudo-detections
+        last_blue = []  # cached [(box, 0.85)] calibrated-blue glove hits
+        blue_spec = None
+        _hspec = BASE / "glove_hsv.json"
+        if _hspec.exists() and ("gloves" in CHECKS):
+            try:
+                blue_spec = json.loads(_hspec.read_text())
+                print(f"[INFO] calibrated glove color active (h={blue_spec['h']:.0f})", flush=True)
+            except Exception as e:
+                print(f"[!] glove_hsv.json unreadable: {e}", flush=True)
+                blue_spec = None
         glove_mem = {"has": 0, "flag": 0}  # countdowns: glove evidence seen recently
         frame_n = 0
         alarm_on, last_siren = False, 0.0
@@ -789,6 +840,20 @@ def main():
                         print(f"[!] skin check skipped: {e}", flush=True)
                 if skin_active:
                     nogloves = list(nogloves) + list(last_skin)
+
+                # calibrated blue: YOUR glove color -> positive glove evidence.
+                if blue_spec is not None and persons and frame_n % args.skin_every == 0:
+                    try:
+                        bb = []
+                        for (pbox, _tid, _pc) in persons:
+                            if pbox[3] - pbox[1] < args.min_glove_h:
+                                continue
+                            bb += blue_glove_boxes(grab, pbox, face_boxes, blue_spec)
+                        last_blue = bb
+                    except Exception as e:
+                        print(f"[!] blue-glove check skipped: {e}", flush=True)
+                if blue_spec is not None:
+                    gloves = list(gloves) + list(last_blue)
 
                 # face-zoom second look for tiny masks (the 2m+ fix)
                 if args.face_zoom and not args.ignore_mask and persons \
@@ -913,6 +978,8 @@ def main():
                 # actually seen in the last ~second, else "--".
                 if g_has_any:
                     glove_mem["has"] = 5
+                elif last_blue:
+                    glove_mem["has"] = 5  # calibrated blue seen: green-able
                 else:
                     glove_mem["has"] = max(0, glove_mem["has"] - 1)
                 if g_flag_any:
