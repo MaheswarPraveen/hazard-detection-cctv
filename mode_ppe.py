@@ -517,7 +517,9 @@ def main():
     ap.add_argument("--min-glove-h", type=int, default=180, help="px person height below which gloves are NOT judged (FAR)")
     ap.add_argument("--ignore-mask", action="store_true", help="turn off mask checking (far-field cams)")
     ap.add_argument("--ignore-gloves", action="store_true", help="turn off glove checking")
-    ap.add_argument("--no-skin", action="store_true", help="disable skin-based bare-hand fallback")
+    ap.add_argument("--skin", action="store_true",
+                    help="opt-in skin-based bare-hand fallback (off by default: skin-tone "
+                         "plaid shirts false-fire it; solid dark sleeves read cleanest)")
     ap.add_argument("--skin-every", type=int, default=3, help="run bare-hand check every N inferences")
     ap.add_argument("--silent", action="store_true", help="no siren sound - display only")
     ap.add_argument("--glove-every", type=int, default=8, help="run 2nd gloves model every N inferences (CPU saver)")
@@ -638,7 +640,7 @@ def main():
         if "vest" in CHECKS:
             tally["no_vest"] = 0
         judge_gloves_live = ("gloves" in CHECKS) and (HAS_GLOVES_MAIN or want_gloves)
-        skin_capable = ("gloves" in CHECKS) and not HAS_GLOVES_MAIN and not args.no_skin
+        skin_capable = ("gloves" in CHECKS) and not HAS_GLOVES_MAIN and args.skin
         if skin_capable:  # classical fallback counts as a live glove check
             judge_gloves_live = True
         if judge_gloves_live:
