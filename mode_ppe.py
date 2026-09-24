@@ -257,6 +257,18 @@ def glove_plausible(gbox, pbox):
     return True
 
 
+def _is_textured(gray, bx, by, bw2, bh2, thresh=0.08):
+    """True if the blob interior is full of edges (plaid/checks). A smooth glove
+    (or hand) has a quiet interior; a shirt check is edgy even inside. Looks at
+    the inner 50% so the blob's own outline never counts against it."""
+    ix1, iy1 = bx + bw2 // 4, by + bh2 // 4
+    ix2, iy2 = bx + 3 * bw2 // 4, by + 3 * bh2 // 4
+    if ix2 - ix1 < 10 or iy2 - iy1 < 10:
+        return False
+    edges = cv2.Canny(gray[iy1:iy2, ix1:ix2], 50, 150)
+    return (float(edges.mean()) / 255.0) > thresh
+
+
 def bare_hand_boxes(frame, pbox, face_boxes):
     """Classical-vision fallback for bare hands (no training needed): skin blobs
     shaped like a hand, below the head, face excluded. Returns [(box, 0.90)] as
@@ -280,6 +292,7 @@ def bare_hand_boxes(frame, pbox, face_boxes):
         if ex2 > ex1 and ey2 > ey1:
             skin[ey1:ey2, ex1:ex2] = 0
     skin = cv2.morphologyEx(skin, cv2.MORPH_OPEN, np.ones((3, 3), np.uint8))
+    gray = cv2.cvtColor(crop, cv2.COLOR_BGR2GRAY)
     cnts, _ = cv2.findContours(skin, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
     out, pa = [], max(1.0, float(w * h))
     for c in cnts:
@@ -290,6 +303,8 @@ def bare_hand_boxes(frame, pbox, face_boxes):
         ar = bw2 / max(1, bh2)
         if not (0.4 <= ar <= 2.5):  # hands are compact; forearms are elongated
             continue
+        if _is_textured(gray, bx, by, bw2, bh2):
+            continue  # plaid/checks, not skin-on-hand
         out.append(([float(x1 + bx), float(y1 + by),
                      float(x1 + bx + bw2), float(y1 + by + bh2)], 0.90))
     return out
@@ -320,6 +335,7 @@ def blue_glove_boxes(frame, pbox, face_boxes, spec):
         if ex2 > ex1 and ey2 > ey1:
             blue[ey1:ey2, ex1:ex2] = 0
     blue = cv2.morphologyEx(blue, cv2.MORPH_OPEN, np.ones((3, 3), np.uint8))
+    gray = cv2.cvtColor(crop, cv2.COLOR_BGR2GRAY)
     cnts, _ = cv2.findContours(blue, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
     out, pa = [], max(1.0, float(w * h))
     for c in cnts:
@@ -330,6 +346,8 @@ def blue_glove_boxes(frame, pbox, face_boxes, spec):
         ar = bw2 / max(1, bh2)
         if not (0.4 <= ar <= 2.5):  # compact blobs only, not sleeves/walls
             continue
+        if _is_textured(gray, bx, by, bw2, bh2):
+            continue  # check pattern, not a smooth glove
         out.append(([float(x1 + bx), float(y1 + by),
                      float(x1 + bx + bw2), float(y1 + by + bh2)], 0.85))
     return out
