@@ -9,7 +9,8 @@ if "%pick%"=="2" goto vg
 python mode_ppe.py --source 0 --camera CAM01 --checks helmet,mask --imgsz 480 --conf 0.25 --silent
 goto end
 :vg
-python mode_ppe.py --source 0 --camera CAM01 --checks vest,gloves --gloves-model ppe_v8m.pt --imgsz 416 --conf 0.25 --silent
+python mode_ppe.py --source 0 --camera CAM01 --checks vest,gloves --imgsz 416 --conf 0.25 --silent
+REM gloves return with fine-tuned weights: add  --gloves-model best.pt  (ppe_v8m.pt is blind on our feed)
 :end
 echo.
 echo App stopped. Press any key to close this window.

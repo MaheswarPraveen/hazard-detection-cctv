@@ -26,8 +26,10 @@ MODES = {
     "ppe_mh": {"file": "mode_ppe.py", "name": "PPE Mask + Helmet", "desc": "Face-mask & hardhat station",
                "extra": ["--checks", "helmet,mask", "--silent"]},
     "ppe_vg": {"file": "mode_ppe.py", "name": "PPE Vest + Gloves", "desc": "Safety-vest & blue-gloves gate (2-3 m)",
-               "extra": ["--checks", "vest,gloves", "--imgsz", "416", "--silent", "--glove-conf", "0.15",
-                         "--gloves-model", "ppe_v8m.pt", "--glove-every", "12"]},
+               "extra": ["--checks", "vest,gloves", "--imgsz", "416", "--silent"]},
+    # NOTE: ppe_v8m.pt proved stone-blind on this feed (zero boxes at conf 0.05
+    # across all scenes) so it ships DISABLED. Gloves come back with fine-tuned
+    # weights: add "--gloves-model best.pt" above when they exist.
 }
 CAM_MODES = ("zone", "ppe_mh", "ppe_vg")  # share one camera: only one runs at a time
 LOCK_OF = {"zone": "zone.lock", "ppe_mh": "ppe_mh.lock", "ppe_vg": "ppe_vg.lock"}
