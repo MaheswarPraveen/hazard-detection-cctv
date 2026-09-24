@@ -26,7 +26,7 @@ MODES = {
     "ppe_mh": {"file": "mode_ppe.py", "name": "PPE Mask + Helmet", "desc": "Face-mask & hardhat station",
                "extra": ["--checks", "helmet,mask", "--silent"]},
     "ppe_vg": {"file": "mode_ppe.py", "name": "PPE Vest + Gloves", "desc": "Safety-vest & blue-gloves gate (2-3 m)",
-               "extra": ["--checks", "vest,gloves", "--imgsz", "416", "--silent",
+               "extra": ["--checks", "vest,gloves", "--imgsz", "416", "--silent", "--glove-conf", "0.15",
                          "--gloves-model", "ppe_v8m.pt", "--glove-every", "12"]},
 }
 CAM_MODES = ("zone", "ppe_mh", "ppe_vg")  # share one camera: only one runs at a time
