@@ -256,6 +256,44 @@ def glove_plausible(gbox, pbox):
     return True
 
 
+def bare_hand_boxes(frame, pbox, face_boxes):
+    """Classical-vision fallback for bare hands (no training needed): skin blobs
+    shaped like a hand, below the head, face excluded. Returns [(box, 0.90)] as
+    NO-Gloves pseudo-detections flowing through the normal association /
+    arbitration / lock pipeline. Fires red on bare skin; gloved or hidden hands
+    stay idle. Long sleeves read cleanest (bare forearms can mimic hands)."""
+    x1, y1, x2, y2 = (int(v) for v in pbox)
+    fh, fw = frame.shape[:2]
+    x1, y1, x2, y2 = max(0, x1), max(0, y1), min(fw, x2), min(fh, y2)
+    if x2 - x1 < 30 or y2 - y1 < 60:
+        return []
+    crop = frame[y1:y2, x1:x2]
+    ycc = cv2.cvtColor(crop, cv2.COLOR_BGR2YCrCb)
+    skin = cv2.inRange(ycc, np.array([0, 133, 77], dtype=np.uint8),
+                       np.array([255, 173, 127], dtype=np.uint8))
+    h, w = skin.shape[:2]
+    skin[:int(h * 0.30), :] = 0  # head zone: never hands
+    for (fx1, fy1, fx2, fy2) in face_boxes:  # face + neck margin excluded
+        ex1, ex2 = max(0, int(fx1 - x1 - 10)), min(w, int(fx2 - x1 + 10))
+        ey1, ey2 = max(0, int(fy1 - y1 - 10)), min(h, int(fy2 - y1 + int(max(0.0, fy2 - fy1) * 0.6)))
+        if ex2 > ex1 and ey2 > ey1:
+            skin[ey1:ey2, ex1:ex2] = 0
+    skin = cv2.morphologyEx(skin, cv2.MORPH_OPEN, np.ones((3, 3), np.uint8))
+    cnts, _ = cv2.findContours(skin, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+    out, pa = [], max(1.0, float(w * h))
+    for c in cnts:
+        area = cv2.contourArea(c)
+        if not (0.005 * pa <= area <= 0.08 * pa):
+            continue
+        bx, by, bw2, bh2 = cv2.boundingRect(c)
+        ar = bw2 / max(1, bh2)
+        if not (0.4 <= ar <= 2.5):  # hands are compact; forearms are elongated
+            continue
+        out.append(([float(x1 + bx), float(y1 + by),
+                     float(x1 + bx + bw2), float(y1 + by + bh2)], 0.90))
+    return out
+
+
 def judge_person(pbox, hats, nohats, vests, novests, gloves, nogloves,
                  masks, nomasks, judge_mask, judge_gloves, glove_absence_counts=True):
     """Return (tags, detail, confs). Lists hold (box, conf); absence alone only
@@ -337,8 +375,13 @@ def load_models(args, checks):
           f"mask={args.mask_conf:.2f} glove={args.glove_conf:.2f} smooth={args.smooth} imgsz={args.imgsz}",
           flush=True)
     if ids["GLOVES"] is None and gmodel is None and not args.ignore_gloves:
-        print("[INFO] primary model has no glove classes -> glove check OFF "
-              "(enable with --gloves-model ppe_v8m.pt at 2-3 m gate)", flush=True)
+        _skin_will = ("gloves" in checks) and not args.no_skin
+        if _skin_will:
+            print("[INFO] no glove classes in weights -> skin-based bare-hand fallback "
+                  "active (red on bare skin, idle otherwise)", flush=True)
+        else:
+            print("[INFO] primary model has no glove classes -> glove check OFF "
+                  "(enable with --gloves-model ppe_v8m.pt at 2-3 m gate)", flush=True)
     return model, ids, has_mask, has_gloves_main, gmodel, gids, base
 
 
@@ -474,6 +517,8 @@ def main():
     ap.add_argument("--min-glove-h", type=int, default=180, help="px person height below which gloves are NOT judged (FAR)")
     ap.add_argument("--ignore-mask", action="store_true", help="turn off mask checking (far-field cams)")
     ap.add_argument("--ignore-gloves", action="store_true", help="turn off glove checking")
+    ap.add_argument("--no-skin", action="store_true", help="disable skin-based bare-hand fallback")
+    ap.add_argument("--skin-every", type=int, default=3, help="run bare-hand check every N inferences")
     ap.add_argument("--silent", action="store_true", help="no siren sound - display only")
     ap.add_argument("--glove-every", type=int, default=8, help="run 2nd gloves model every N inferences (CPU saver)")
     ap.add_argument("--glove-imgsz", type=int, default=320, help="inference size for gloves backup (320 is 3x faster than 640, fine at gate range)")
@@ -593,6 +638,9 @@ def main():
         if "vest" in CHECKS:
             tally["no_vest"] = 0
         judge_gloves_live = ("gloves" in CHECKS) and (HAS_GLOVES_MAIN or want_gloves)
+        skin_capable = ("gloves" in CHECKS) and not HAS_GLOVES_MAIN and not args.no_skin
+        if skin_capable:  # classical fallback counts as a live glove check
+            judge_gloves_live = True
         if judge_gloves_live:
             tally["no_gloves"] = 0
         if HAS_MASK:
@@ -626,6 +674,7 @@ def main():
         tracker_cfg = str(TRACKER_YAML) if TRACKER_YAML.exists() else "bytetrack.yaml"
         last_glove = []  # cached [(box, conf, cls)] from backup model
         last_face = ([], [])  # cached ([(box, conf)], [(box, conf)]) from face-zoom
+        last_skin = []  # cached [(box, 0.90)] bare-hand pseudo-detections
         glove_mem = {"has": 0, "flag": 0}  # countdowns: glove evidence seen recently
         frame_n = 0
         alarm_on, last_siren = False, 0.0
@@ -655,7 +704,7 @@ def main():
                     continue
 
                 persons, hats, nohats, vests, novests = [], [], [], [], []
-                gloves, nogloves, masks, nomasks = [], [], [], []
+                gloves, nogloves, masks, nomasks, face_boxes = [], [], [], [], []
                 # NOTE: no overlay boxes are drawn live - the screen shows only
                 # the side status board. PPE lists below feed judging only.
                 if r.boxes is not None and len(r.boxes) > 0:
@@ -668,8 +717,9 @@ def main():
                         cf = float(cf)
                         if not box_passes(c, cf, args, ids):
                             continue
+                        if c in (ids["MASK"], ids["NO_MASK"]):
+                            face_boxes.append([float(v) for v in box])  # for skin exclusion
                         # profile gate: a station only ever SHOWS its own items
-                        # (mg never draws helmet/vest boxes and vice versa)
                         if c in (ids["HARDHAT"], ids["NO_HARDHAT"]) and "helmet" not in CHECKS:
                             continue
                         if c in (ids["VEST"], ids["NO_VEST"]) and "vest" not in CHECKS:
@@ -722,6 +772,22 @@ def main():
                     for (b, cf, c) in last_glove:
                         (gloves if c == gids.get("GLOVES") else nogloves).append((b, cf))
 
+                # skin fallback: bare hands -> NO-Gloves pseudo-detections.
+                # Runs only while no glove-capable model is loaded.
+                skin_active = skin_capable and gmodel is None
+                if skin_active and persons and frame_n % args.skin_every == 0:
+                    try:
+                        sb = []
+                        for (pbox, _tid, _pc) in persons:
+                            if pbox[3] - pbox[1] < args.min_glove_h:
+                                continue
+                            sb += bare_hand_boxes(grab, pbox, face_boxes)
+                        last_skin = sb
+                    except Exception as e:
+                        print(f"[!] skin check skipped: {e}", flush=True)
+                if skin_active:
+                    nogloves = list(nogloves) + list(last_skin)
+
                 # face-zoom second look for tiny masks (the 2m+ fix)
                 if args.face_zoom and not args.ignore_mask and persons \
                         and frame_n % face_every_cur == 0:
@@ -732,6 +798,7 @@ def main():
                 if args.face_zoom and not args.ignore_mask:
                     masks += last_face[0]
                     nomasks += last_face[1]
+                    face_boxes += [b for b, _ in last_face[0]] + [b for b, _ in last_face[1]]
 
                 # dedup: same object detected twice (seen live: double NO-Mask
                 # boxes flickering with alternating track IDs)
