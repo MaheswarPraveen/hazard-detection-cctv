@@ -873,7 +873,8 @@ def main():
                     if last_logged.get(int(tid)) != _sig:  # transition only: the flicker record
                         last_logged[int(tid)] = _sig
                         _c = {k: (round(a, 2), round(b, 2)) for k, (a, b) in _confs.items()}
-                        print(f"[DBG] tid={tid} raw={raw_tags} locked={confirmed} "
+                        print(f"[DBG] tid={tid} ph={int(pbox[3] - pbox[1])} pc={round(pconf, 2)} "
+                              f"raw={raw_tags} locked={confirmed} "
                               f"hat={_c['helmet']} vest={_c['vest']} "
                               f"mask={_c['mask']} glove={_c['gloves']}", flush=True)
                     if confirmed:
