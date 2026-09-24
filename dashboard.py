@@ -17,7 +17,7 @@ from urllib.parse import urlparse, parse_qs
 
 BASE = Path(__file__).parent
 PORT = 8000
-CAM_SOURCE = "1"  # webcam index or RTSP URL (flip to "0" for the built-in cam)
+CAM_SOURCE = "0"  # webcam index or RTSP URL ("1" = USB cam, when plugged in)
 procs = {}  # mode -> Popen
 
 MODES = {
