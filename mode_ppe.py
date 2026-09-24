@@ -605,8 +605,15 @@ def main():
     src = int(args.source) if str(args.source).isdigit() else str(args.source)
     cap = None
     for attempt in range(1, 4):
-        cap = cv2.VideoCapture(src)
-        if cap.isOpened():
+        try:
+            cap = cv2.VideoCapture(src)
+        except Exception as e:  # flaky USB drivers can throw on open
+            print(f"[!] Camera open raised {e} (attempt {attempt}/3), retrying in 3s...",
+                  flush=True)
+            cap = None
+            time.sleep(3)
+            continue
+        if cap is not None and cap.isOpened():
             break
         print(f"[!] Camera open failed (attempt {attempt}/3), retrying in 3s...", flush=True)
         time.sleep(3)
