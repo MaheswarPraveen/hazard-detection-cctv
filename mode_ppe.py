@@ -506,11 +506,26 @@ def main():
         print(f"[X] Cannot open source {args.source} - check camera cable / RTSP URL", flush=True)
         return
     cap.set(cv2.CAP_PROP_BUFFERSIZE, 1)  # never display stale buffered frames
-    # ask for 1080p, accept whatever the camera grants (720p laptops fine):
-    # inference size is fixed, but the face-zoom crop reads the FULL-RES frame,
-    # so more capture pixels = more mask/glove detail at 2-3 m.
-    cap.set(cv2.CAP_PROP_FRAME_WIDTH, 1920)
-    cap.set(cv2.CAP_PROP_FRAME_HEIGHT, 1080)
+    # negotiate resolution top-down: some USB cams die when asked for 1080p,
+    # so verify with a real grab and step down until frames flow.
+    _negotiated = False
+    for _rw, _rh in ((1920, 1080), (1280, 720), (640, 480)):
+        cap.set(cv2.CAP_PROP_FRAME_WIDTH, _rw)
+        cap.set(cv2.CAP_PROP_FRAME_HEIGHT, _rh)
+        time.sleep(0.3)
+        _ok, _ = cap.read()
+        if _ok:
+            _negotiated = True
+            break
+    if not _negotiated:
+        print(f"[X] Camera {args.source} opens but delivers no frames - "
+              f"close other camera apps / replug USB, then Start again.", flush=True)
+        cap.release()
+        try:
+            lock_path.unlink()
+        except OSError:
+            pass
+        return
     _cw, _ch = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH)), int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
     print(f"[OK] Camera opened: {args.source} ({_cw}x{_ch}) (+{time.time() - T0:.0f}s after click)",
           flush=True)
@@ -872,11 +887,19 @@ def main():
 
     ct0, ctn, cam_fps = time.time(), 0, 0.0
     first_frame = True
+    dead_n = 0
     while True:
         ok, frame = cap.read()
         if not ok:
+            dead_n += 1
+            if dead_n > 150:  # ~5s of dead stream: exit loudly instead of spinning "stuck"
+                print("[X] Camera stream died (5s, no frames) - exiting. "
+                      "Check USB cable / close other camera apps, then Start again.", flush=True)
+                shared["stop"] = True
+                break
             time.sleep(0.02)
             continue
+        dead_n = 0
         with shared["lock"]:
             shared["raw"] = frame
             panel = list(shared["panel"])
