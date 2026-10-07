@@ -1,5 +1,6 @@
 ultralytics>=8.2.0
 opencv-python>=4.9.0
+mediapipe>=1.0
 supervision>=0.22.0
 pandas>=2.0.0
 openpyxl>=3.1.0

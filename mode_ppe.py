@@ -387,6 +387,31 @@ def blue_glove_boxes(frame, pbox, face_boxes, spec):
     return out
 
 
+def _hand_material(frame, hbox, blue_spec):
+    """Inside a landmarked hand box: bare skin, calibrated blue, or unknown.
+    Shape (landmarks) says WHERE the hand is; this says WHAT covers it."""
+    x1, y1, x2, y2 = (int(v) for v in hbox)
+    fh, fw = frame.shape[:2]
+    x1, y1, x2, y2 = max(0, x1), max(0, y1), min(fw, x2), min(fh, y2)
+    if x2 - x1 < 12 or y2 - y1 < 12:
+        return "unknown"
+    crop = frame[y1:y2, x1:x2]
+    ycc = cv2.cvtColor(crop, cv2.COLOR_BGR2YCrCb)
+    skin = cv2.inRange(ycc, np.array([0, 133, 77], dtype=np.uint8),
+                       np.array([255, 173, 127], dtype=np.uint8))
+    if float(skin.mean()) / 255.0 > 0.12:
+        return "bare"
+    if blue_spec is not None:
+        hsv = cv2.cvtColor(crop, cv2.COLOR_BGR2HSV)
+        lo = np.array([max(0.0, blue_spec["h"] - 10), max(0.0, blue_spec["s"] - 35),
+                       max(0.0, blue_spec["v"] - 60)], dtype=np.uint8)
+        hi = np.array([min(179.0, blue_spec["h"] + 10), 255, 255], dtype=np.uint8)
+        blue = cv2.inRange(hsv, lo, hi)
+        if float(blue.mean()) / 255.0 > 0.25:
+            return "blue"
+    return "unknown"
+
+
 def judge_person(pbox, hats, nohats, vests, novests, gloves, nogloves,
                  masks, nomasks, judge_mask, judge_gloves, glove_absence_counts=True):
     """Return (tags, detail, confs). Lists hold (box, conf); absence alone only
@@ -648,6 +673,8 @@ def main():
                     help="second close-up pass on face crop for tiny masks at 2m+ (use --no-face-zoom to disable)")
     ap.add_argument("--face-every", type=int, default=3, help="run face-zoom every N inferences (CPU saver)")
     ap.add_argument("--face-imgsz", type=int, default=256, help="inference size for the face crop")
+    ap.add_argument("--hand-every", type=int, default=4, help="run hand-landmark shape check every N inferences")
+    ap.add_argument("--no-hands", action="store_true", help="disable hand-landmark shape check")
     args = ap.parse_args()
 
     # ---- check profile: split stations (helmet+vest) vs (mask+gloves) ----
@@ -782,6 +809,23 @@ def main():
         last_face = ([], [])  # cached ([(box, conf)], [(box, conf)]) from face-zoom
         last_skin = []  # cached [(box, 0.90)] bare-hand pseudo-detections
         last_blue = []  # cached [(box, 0.85)] calibrated-blue glove hits
+        last_hands = []  # cached [(box, kind)] landmarked hands: bare/blue
+        hand_det, hand_mp = None, None
+        if ("gloves" in CHECKS) and not args.no_hands:
+            try:
+                import mediapipe as _mp
+                from mediapipe.tasks import python as _mp_python
+                from mediapipe.tasks.python import vision as _mp_vision
+                _bo = _mp.tasks.BaseOptions(model_asset_path=str(BASE / "hand_landmarker.task"))
+                _ho = _mp_vision.HandLandmarkerOptions(
+                    base_options=_bo, num_hands=4,
+                    min_hand_detection_confidence=0.3, min_tracking_confidence=0.3)
+                hand_det = _mp_vision.HandLandmarker.create_from_options(_ho)
+                hand_mp = _mp
+                print("[INFO] hand landmarks active (shape-based, any glove color)", flush=True)
+            except Exception as e:
+                print(f"[!] hand landmarks unavailable: {e}", flush=True)
+                hand_det = None
         blue_spec = None
         _hspec = BASE / "glove_hsv.json"
         if _hspec.exists() and ("gloves" in CHECKS):
@@ -919,6 +963,40 @@ def main():
                         print(f"[!] blue-glove check skipped: {e}", flush=True)
                 if blue_spec is not None:
                     gloves = list(gloves) + list(last_blue)
+
+                # hand landmarks: true shape detection. Each landmarked hand is
+                # associated to a person, then read for material (bare/blue).
+                if hand_det is not None and persons and frame_n % args.hand_every == 0:
+                    try:
+                        _rgb = cv2.cvtColor(grab, cv2.COLOR_BGR2RGB)
+                        _res = hand_det.detect(hand_mp.Image(
+                            image_format=hand_mp.ImageFormat.SRGB, data=_rgb))
+                        _fh, _fw = grab.shape[:2]
+                        _hb = []
+                        for _hl in _res.hand_landmarks:
+                            _xs = [p.x for p in _hl]
+                            _ys = [p.y for p in _hl]
+                            _hx1 = max(0, int(min(_xs) * _fw) - 8)
+                            _hy1 = max(0, int(min(_ys) * _fh) - 8)
+                            _hx2 = min(_fw, int(max(_xs) * _fw) + 8)
+                            _hy2 = min(_fh, int(max(_ys) * _fh) + 8)
+                            _cx, _cy = (_hx1 + _hx2) / 2, (_hy1 + _hy2) / 2
+                            for (pbox, _tid, _pc) in persons:
+                                _ex1, _ey1, _ex2, _ey2 = expand_person(pbox)
+                                if _ex1 <= _cx <= _ex2 and _ey1 <= _cy <= _ey2 \
+                                        and pbox[3] - pbox[1] >= args.min_glove_h:
+                                    _kind = _hand_material(
+                                        grab, (_hx1, _hy1, _hx2, _hy2), blue_spec)
+                                    _hb.append(([_hx1, _hy1, _hx2, _hy2], _kind))
+                                    break
+                        last_hands = _hb
+                    except Exception as e:
+                        print(f"[!] hand-landmark frame skipped: {e}", flush=True)
+                for (_hb2, _kind2) in last_hands:
+                    if _kind2 == "bare":
+                        nogloves.append(([_hb2[0], _hb2[1], _hb2[2], _hb2[3]], 0.92))
+                    elif _kind2 == "blue":
+                        gloves.append(([_hb2[0], _hb2[1], _hb2[2], _hb2[3]], 0.90))
 
                 # face-zoom second look for tiny masks (the 2m+ fix)
                 if args.face_zoom and not args.ignore_mask and persons \
@@ -1084,6 +1162,7 @@ def main():
                     itn, it0 = 0, now
                 if now - perf_t0 >= 10.0:
                     print(f"[PERF] infer {infer_fps:.1f}Hz persons={len(persons)} "
+                          f"hands={len(last_hands)} "
                           f"panel={[(l, s) for l, s in panel]} visitors={len(visitors)}", flush=True)
                     # auto-throttle: extras (zoom/gloves) back off when the CPU can't
                     # keep up, recover when it can. Hysteresis via 10s windows.
