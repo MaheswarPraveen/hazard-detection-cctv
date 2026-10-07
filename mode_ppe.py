@@ -270,8 +270,7 @@ def _finger_valleys(cnt, min_depth_frac=0.12):
             return 0
         _, _, _, bh = cv2.boundingRect(cnt)
         n = 0
-        for i in range(defects.shape[0]):
-            _s, _e, _f, d = defects[i, 0]
+        for (_s, _e, _f, d) in np.asarray(defects).reshape(-1, 4):
             if d / 256.0 > max(4.0, bh * min_depth_frac):
                 n += 1
         return n
@@ -334,9 +333,9 @@ def bare_hand_boxes(frame, pbox, face_boxes):
             continue  # touches face/neck exclusion: neck remnant, not a hand
         if _is_textured(gray, bx, by, bw2, bh2):
             continue  # plaid/checks, not skin-on-hand
-        _v = _finger_valleys(c)
+        _v = _finger_valleys(c)  # >=1 deep valley = finger gaps = hand-shaped
         out.append(([float(x1 + bx), float(y1 + by),
-                     float(x1 + bx + bw2), float(y1 + by + bh2)], 0.92 if _v >= 2 else 0.90))
+                     float(x1 + bx + bw2), float(y1 + by + bh2)], 0.92 if _v >= 1 else 0.90))
     return out
 
 
@@ -378,9 +377,9 @@ def blue_glove_boxes(frame, pbox, face_boxes, spec):
             continue
         if _is_textured(gray, bx, by, bw2, bh2):
             continue  # check pattern, not a smooth glove
-        _v = _finger_valleys(c)
+        _v = _finger_valleys(c)  # >=1 deep valley = finger gaps = hand-shaped
         out.append(([float(x1 + bx), float(y1 + by),
-                     float(x1 + bx + bw2), float(y1 + by + bh2)], 0.90 if _v >= 2 else 0.85))
+                     float(x1 + bx + bw2), float(y1 + by + bh2)], 0.90 if _v >= 1 else 0.85))
     return out
 
 
