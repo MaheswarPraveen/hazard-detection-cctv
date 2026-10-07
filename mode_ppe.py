@@ -738,7 +738,7 @@ def main():
         "panel": [],  # [(label, state)] state in ok/bad/idle, profile order
         "models_ready": False,
         "hud": {"violations": 0, "persons": 0, "visitors": 0, "ok": 0,
-                "tally": {}, "infer_fps": 0.0, "cam_fps": 0.0},
+                "tally": {}, "infer_fps": 0.0, "cam_fps": 0.0, "dist": "empty"},
         "stop": False,
         "lock": threading.Lock(),
     }
@@ -1196,9 +1196,19 @@ def main():
                 with shared["lock"]:
                     cam = shared["hud"]["cam_fps"]
                     shared["panel"] = panel
+                    _fracs = [(p[3] - p[1]) / max(1, grab.shape[0]) for p, _, _ in persons]
+                    if not _fracs:
+                        _dist = "empty"
+                    elif max(_fracs) > 0.85:
+                        _dist = "close"
+                    elif max(_fracs) < 0.25:
+                        _dist = "far"
+                    else:
+                        _dist = "ok"
                     shared["hud"] = {"violations": violations, "persons": len(persons),
                                      "visitors": len(visitors), "ok": len(ok_visitors),
-                                     "tally": dict(tally), "infer_fps": infer_fps, "cam_fps": cam}
+                                     "tally": dict(tally), "infer_fps": infer_fps, "cam_fps": cam,
+                                     "dist": _dist}
                 ema_dt = 0.9 * ema_dt + 0.1 * (time.time() - inf_t0)
         except Exception:
             traceback.print_exc()
@@ -1268,6 +1278,16 @@ def main():
         cv2.circle(frame, (int(26 * fs), int(23 * fs)), _th(6), (255, 255, 255), -1)
         cv2.putText(frame, "WARNING" if v > 0 else "ALL COMPLIANT", (int(40 * fs), int(28 * fs)),
                     cv2.FONT_HERSHEY_SIMPLEX, _fs(0.6), (255, 255, 255), _th(2))
+        # distance coach: most misreads are just wrong range, not wrong AI.
+        _dist = hud.get("dist", "empty")
+        if _dist in ("close", "far"):
+            _msg = "STEP BACK - TOO CLOSE" if _dist == "close" else "COME CLOSER - TOO FAR"
+            (tdw, _tdh), _ = cv2.getTextSize(_msg, cv2.FONT_HERSHEY_SIMPLEX, _fs(0.6), _th(2))
+            _tx = int((fw - tdw) / 2)
+            cv2.rectangle(frame, (_tx - 10, int(46 * fs)), (_tx + tdw + 10, int(46 * fs) + int(30 * fs)),
+                          (25, 25, 25), -1)
+            cv2.putText(frame, _msg, (_tx, int(46 * fs) + int(22 * fs)),
+                        cv2.FONT_HERSHEY_SIMPLEX, _fs(0.6), (0, 200, 255), _th(2))
         # bottom status bar: one dark strip, dot + LABEL + YES/NO per item.
         # green = worn, red = missing, gray = nobody in view. Tallies live on
         # the dashboard, not on the video.

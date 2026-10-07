@@ -28,7 +28,9 @@ def main():
     if not cap.isOpened():
         print(f"[X] Cannot open source {args.source}")
         return
-    print("[OK] Fill the center box with the glove, press S to sample, Q to quit.")
+    print("[OK] Fill the center box with the glove, press S to sample (up to 5x, "
+          "different angles/light - samples merge), Q to quit.")
+    samples = []
 
     while True:
         ok, frame = cap.read()
@@ -53,16 +55,20 @@ def main():
                 print("[!] too dull - get closer / add light, try again")
                 continue
             med = np.median(vivid, axis=0)
-            spec = {"h": float(med[0]), "s": float(med[1]), "v": float(med[2])}
+            samples.append(np.array([med[0], med[1], med[2]]))
+            samples = samples[-5:]  # keep last 5, median-merged = outlier-proof
+            fused = np.median(np.stack(samples), axis=0)
+            spec = {"h": float(fused[0]), "s": float(fused[1]), "v": float(fused[2]),
+                    "n": len(samples)}
             (BASE / "glove_hsv.json").write_text(json.dumps(spec))
-            lo = np.array([max(0, med[0] - 10), max(0, med[1] - 35), max(0, med[2] - 60)],
+            lo = np.array([max(0, fused[0] - 10), max(0, fused[1] - 35), max(0, fused[2] - 60)],
                           dtype=np.uint8)
-            hi = np.array([min(179, med[0] + 10), 255, 255], dtype=np.uint8)
+            hi = np.array([min(179, fused[0] + 10), 255, 255], dtype=np.uint8)
             prev = cv2.inRange(cv2.cvtColor(frame, cv2.COLOR_BGR2HSV), lo, hi)
             cv2.imshow("Preview: white = counts as glove (any key continues)", prev)
             cv2.waitKey(0)
-            print(f"[OK] saved glove_hsv.json h={med[0]:.0f} s={med[1]:.0f} v={med[2]:.0f} "
-                  f"(restart the Vest+Gloves station to use it)")
+            print(f"[OK] sample {len(samples)} merged -> h={fused[0]:.0f} s={fused[1]:.0f} "
+                  f"v={fused[2]:.0f} (restart the Vest+Gloves station to use it)")
 
     cap.release()
     cv2.destroyAllWindows()
