@@ -562,6 +562,31 @@ def run_image_test(args, model, ids, gmodel, gids, checks):
 
 
 # ---------------------------------------------------------------- live loop
+def _try_open(src):
+    """Open camera + negotiate a working resolution (top-down with real test
+    grabs: some USB cams die when asked for 1080p). Returns cap or None."""
+    try:
+        cap = cv2.VideoCapture(src)
+    except Exception as e:  # flaky drivers can throw on open
+        print(f"[!] Camera open raised {e}", flush=True)
+        return None
+    if cap is None or not cap.isOpened():
+        return None
+    cap.set(cv2.CAP_PROP_BUFFERSIZE, 1)  # never display stale buffered frames
+    for _rw, _rh in ((1920, 1080), (1280, 720), (640, 480)):
+        cap.set(cv2.CAP_PROP_FRAME_WIDTH, _rw)
+        cap.set(cv2.CAP_PROP_FRAME_HEIGHT, _rh)
+        time.sleep(0.3)
+        try:
+            _ok, _ = cap.read()
+        except Exception:
+            _ok = False
+        if _ok:
+            return cap
+    cap.release()
+    return None
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--source", default="0", help="0 webcam / RTSP URL / image.jpg for single-photo test")
@@ -632,37 +657,14 @@ def main():
     src = int(args.source) if str(args.source).isdigit() else str(args.source)
     cap = None
     for attempt in range(1, 4):
-        try:
-            cap = cv2.VideoCapture(src)
-        except Exception as e:  # flaky USB drivers can throw on open
-            print(f"[!] Camera open raised {e} (attempt {attempt}/3), retrying in 3s...",
-                  flush=True)
-            cap = None
-            time.sleep(3)
-            continue
-        if cap is not None and cap.isOpened():
+        cap = _try_open(src)
+        if cap is not None:
             break
         print(f"[!] Camera open failed (attempt {attempt}/3), retrying in 3s...", flush=True)
         time.sleep(3)
-    if cap is None or not cap.isOpened():
-        print(f"[X] Cannot open source {args.source} - check camera cable / RTSP URL", flush=True)
-        return
-    cap.set(cv2.CAP_PROP_BUFFERSIZE, 1)  # never display stale buffered frames
-    # negotiate resolution top-down: some USB cams die when asked for 1080p,
-    # so verify with a real grab and step down until frames flow.
-    _negotiated = False
-    for _rw, _rh in ((1920, 1080), (1280, 720), (640, 480)):
-        cap.set(cv2.CAP_PROP_FRAME_WIDTH, _rw)
-        cap.set(cv2.CAP_PROP_FRAME_HEIGHT, _rh)
-        time.sleep(0.3)
-        _ok, _ = cap.read()
-        if _ok:
-            _negotiated = True
-            break
-    if not _negotiated:
-        print(f"[X] Camera {args.source} opens but delivers no frames - "
-              f"close other camera apps / replug USB, then Start again.", flush=True)
-        cap.release()
+    if cap is None:
+        print(f"[X] Cannot open source {args.source} - close other camera apps / "
+              f"replug USB, then Start again.", flush=True)
         try:
             lock_path.unlink()
         except OSError:
@@ -1115,11 +1117,21 @@ def main():
         ok, frame = cap.read()
         if not ok:
             dead_n += 1
-            if dead_n > 150:  # ~5s of dead stream: exit loudly instead of spinning "stuck"
-                print("[X] Camera stream died (5s, no frames) - exiting. "
-                      "Check USB cable / close other camera apps, then Start again.", flush=True)
-                shared["stop"] = True
-                break
+            if dead_n > 150:  # ~5s of dead stream: reopen in place (keeps tally/state)
+                print("[!] Camera stream dead 5s - reopening (state kept)...", flush=True)
+                try:
+                    cap.release()
+                except Exception:
+                    pass
+                time.sleep(2)
+                cap = _try_open(src)
+                if cap is None:
+                    print("[X] reopen failed - exiting. Close other camera apps / "
+                          "replug USB, then Start again.", flush=True)
+                    shared["stop"] = True
+                    break
+                dead_n = 0
+                print("[OK] camera stream recovered", flush=True)
             time.sleep(0.02)
             continue
         dead_n = 0
