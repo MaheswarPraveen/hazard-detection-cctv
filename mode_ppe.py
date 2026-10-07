@@ -286,23 +286,30 @@ def bare_hand_boxes(frame, pbox, face_boxes):
                        np.array([255, 173, 127], dtype=np.uint8))
     h, w = skin.shape[:2]
     skin[:int(h * 0.30), :] = 0  # head zone: never hands
+    exclusions = []
     for (fx1, fy1, fx2, fy2) in face_boxes:  # face + full neck column excluded
         ex1, ex2 = max(0, int(fx1 - x1 - 10)), min(w, int(fx2 - x1 + 10))
         ey1, ey2 = max(0, int(fy1 - y1 - 10)), min(h, int(fy2 - y1 + int(max(0.0, fy2 - fy1) * 1.0)))
         if ex2 > ex1 and ey2 > ey1:
             skin[ey1:ey2, ex1:ex2] = 0
+            exclusions.append((ex1 - 8, ey1 - 8, ex2 + 8, ey2 + 8))
     skin = cv2.morphologyEx(skin, cv2.MORPH_OPEN, np.ones((3, 3), np.uint8))
     gray = cv2.cvtColor(crop, cv2.COLOR_BGR2GRAY)
     cnts, _ = cv2.findContours(skin, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
     out, pa = [], max(1.0, float(w * h))
     for c in cnts:
         area = cv2.contourArea(c)
-        if not (0.005 * pa <= area <= 0.08 * pa):
+        if not (0.005 * pa <= area <= 0.035 * pa):  # hands are small; necks/arms run bigger
             continue
         bx, by, bw2, bh2 = cv2.boundingRect(c)
         ar = bw2 / max(1, bh2)
         if not (0.4 <= ar <= 2.5):  # hands are compact; forearms are elongated
             continue
+        if by <= 5:
+            continue  # touches person top: head-area remnant
+        if any(bx < ex2 and ex1 < bx + bw2 and by < ey2 and ey1 < by + bh2
+               for (ex1, ey1, ex2, ey2) in exclusions):
+            continue  # touches face/neck exclusion: neck remnant, not a hand
         if _is_textured(gray, bx, by, bw2, bh2):
             continue  # plaid/checks, not skin-on-hand
         out.append(([float(x1 + bx), float(y1 + by),
