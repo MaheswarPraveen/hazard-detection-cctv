@@ -308,9 +308,10 @@ def bare_hand_boxes(frame, pbox, face_boxes):
     h, w = skin.shape[:2]
     skin[:int(h * 0.30), :] = 0  # head zone: never hands
     exclusions = []
-    for (fx1, fy1, fx2, fy2) in face_boxes:  # face + full neck column excluded
-        ex1, ex2 = max(0, int(fx1 - x1 - 10)), min(w, int(fx2 - x1 + 10))
-        ey1, ey2 = max(0, int(fy1 - y1 - 10)), min(h, int(fy2 - y1 + int(max(0.0, fy2 - fy1) * 1.0)))
+    for (fx1, fy1, fx2, fy2) in face_boxes:  # face + hair halo + neck column
+        _fwf, _fhf = max(1.0, fx2 - fx1), max(1.0, fy2 - fy1)
+        ex1, ex2 = max(0, int(fx1 - x1 - 0.45 * _fwf)), min(w, int(fx2 - x1 + 0.45 * _fwf))
+        ey1, ey2 = max(0, int(fy1 - y1 - 0.60 * _fhf)), min(h, int(fy2 - y1 + 1.0 * _fhf))
         if ex2 > ex1 and ey2 > ey1:
             skin[ey1:ey2, ex1:ex2] = 0
             exclusions.append((ex1 - 8, ey1 - 8, ex2 + 8, ey2 + 8))
@@ -352,15 +353,18 @@ def blue_glove_boxes(frame, pbox, face_boxes, spec):
         return []
     crop = frame[y1:y2, x1:x2]
     hsv = cv2.cvtColor(crop, cv2.COLOR_BGR2HSV)
-    lo = np.array([max(0.0, spec["h"] - 10), max(0.0, spec["s"] - 60), max(0.0, spec["v"] - 60)],
+    # tight S window: the glove sample's saturation excludes grayish dark hair;
+    # ±10 hue keeps the exact blue, wide V tolerates gate lighting shifts.
+    lo = np.array([max(0.0, spec["h"] - 10), max(0.0, spec["s"] - 35), max(0.0, spec["v"] - 60)],
                   dtype=np.uint8)
     hi = np.array([min(179.0, spec["h"] + 10), 255, 255], dtype=np.uint8)
     blue = cv2.inRange(hsv, lo, hi)
     h, w = blue.shape[:2]
     blue[:int(h * 0.30), :] = 0  # head zone: never hands
-    for (fx1, fy1, fx2, fy2) in face_boxes:  # face + full neck column excluded
-        ex1, ex2 = max(0, int(fx1 - x1 - 10)), min(w, int(fx2 - x1 + 10))
-        ey1, ey2 = max(0, int(fy1 - y1 - 10)), min(h, int(fy2 - y1 + int(max(0.0, fy2 - fy1) * 1.0)))
+    for (fx1, fy1, fx2, fy2) in face_boxes:  # face + hair halo + neck column
+        _fwf, _fhf = max(1.0, fx2 - fx1), max(1.0, fy2 - fy1)
+        ex1, ex2 = max(0, int(fx1 - x1 - 0.45 * _fwf)), min(w, int(fx2 - x1 + 0.45 * _fwf))
+        ey1, ey2 = max(0, int(fy1 - y1 - 0.60 * _fhf)), min(h, int(fy2 - y1 + 1.0 * _fhf))
         if ex2 > ex1 and ey2 > ey1:
             blue[ey1:ey2, ex1:ex2] = 0
     blue = cv2.morphologyEx(blue, cv2.MORPH_OPEN, np.ones((3, 3), np.uint8))

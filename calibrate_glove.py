@@ -55,7 +55,7 @@ def main():
             med = np.median(vivid, axis=0)
             spec = {"h": float(med[0]), "s": float(med[1]), "v": float(med[2])}
             (BASE / "glove_hsv.json").write_text(json.dumps(spec))
-            lo = np.array([max(0, med[0] - 10), max(0, med[1] - 60), max(0, med[2] - 60)],
+            lo = np.array([max(0, med[0] - 10), max(0, med[1] - 35), max(0, med[2] - 60)],
                           dtype=np.uint8)
             hi = np.array([min(179, med[0] + 10), 255, 255], dtype=np.uint8)
             prev = cv2.inRange(cv2.cvtColor(frame, cv2.COLOR_BGR2HSV), lo, hi)
