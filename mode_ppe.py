@@ -257,6 +257,28 @@ def glove_plausible(gbox, pbox):
     return True
 
 
+def _finger_valleys(cnt, min_depth_frac=0.12):
+    """Count deep convexity-defect valleys on a contour = finger gaps. An open
+    hand shows 2-4; a fist, sleeve, or shirt patch shows ~0. Pure OpenCV shape
+    analysis (no model): real hand silhouette check for skin/blue blobs."""
+    try:
+        hull = cv2.convexHull(cnt, returnPoints=False)
+        if hull is None or len(hull) < 3:
+            return 0
+        defects = cv2.convexityDefects(cnt, hull)
+        if defects is None:
+            return 0
+        _, _, _, bh = cv2.boundingRect(cnt)
+        n = 0
+        for i in range(defects.shape[0]):
+            _s, _e, _f, d = defects[i, 0]
+            if d / 256.0 > max(4.0, bh * min_depth_frac):
+                n += 1
+        return n
+    except Exception:
+        return 0
+
+
 def _is_textured(gray, bx, by, bw2, bh2, thresh=0.08):
     """True if the blob interior is full of edges (plaid/checks). A smooth glove
     (or hand) has a quiet interior; a shirt check is edgy even inside. Looks at
@@ -312,8 +334,9 @@ def bare_hand_boxes(frame, pbox, face_boxes):
             continue  # touches face/neck exclusion: neck remnant, not a hand
         if _is_textured(gray, bx, by, bw2, bh2):
             continue  # plaid/checks, not skin-on-hand
+        _v = _finger_valleys(c)
         out.append(([float(x1 + bx), float(y1 + by),
-                     float(x1 + bx + bw2), float(y1 + by + bh2)], 0.90))
+                     float(x1 + bx + bw2), float(y1 + by + bh2)], 0.92 if _v >= 2 else 0.90))
     return out
 
 
@@ -355,8 +378,9 @@ def blue_glove_boxes(frame, pbox, face_boxes, spec):
             continue
         if _is_textured(gray, bx, by, bw2, bh2):
             continue  # check pattern, not a smooth glove
+        _v = _finger_valleys(c)
         out.append(([float(x1 + bx), float(y1 + by),
-                     float(x1 + bx + bw2), float(y1 + by + bh2)], 0.85))
+                     float(x1 + bx + bw2), float(y1 + by + bh2)], 0.90 if _v >= 2 else 0.85))
     return out
 
 
