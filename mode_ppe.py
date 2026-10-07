@@ -36,6 +36,8 @@ import subprocess
 import threading
 import time
 import traceback
+
+import alerts  # local: email + WhatsApp (silent no-op without alerts.json)
 from collections import defaultdict
 from datetime import datetime
 from pathlib import Path
@@ -669,6 +671,8 @@ def main():
                          "plaid shirts false-fire it; solid dark sleeves read cleanest)")
     ap.add_argument("--skin-every", type=int, default=3, help="run bare-hand check every N inferences")
     ap.add_argument("--silent", action="store_true", help="no siren sound - display only")
+    ap.add_argument("--alert-cooldown", type=int, default=300,
+                    help="seconds between repeat mail/WhatsApp alerts per violation type")
     ap.add_argument("--glove-every", type=int, default=8, help="run 2nd gloves model every N inferences (CPU saver)")
     ap.add_argument("--glove-imgsz", type=int, default=320, help="inference size for gloves backup (320 is 3x faster than 640, fine at gate range)")
     ap.add_argument("--face-zoom", action=argparse.BooleanOptionalAction, default=True,
@@ -813,6 +817,7 @@ def main():
         last_skin = []  # cached [(box, 0.90)] bare-hand pseudo-detections
         last_blue = []  # cached [(box, 0.85)] calibrated-blue glove hits
         last_hands = []  # cached [(box, kind)] landmarked hands: bare/blue
+        alert_throttle = alerts.Throttle(args.alert_cooldown)
         hand_det, hand_mp = None, None
         if ("gloves" in CHECKS) and not args.no_hands:
             try:
@@ -1112,6 +1117,10 @@ def main():
                                 tally["no_mask"] += 1
                             save_tally(tally_path, visitors, ok_visitors, tally)
                             print(f"[WARNING] ID:{tid} {vtype}", flush=True)
+                            if alert_throttle.ready((TAG, vtype)):  # mail/WhatsApp (no-op w/o alerts.json)
+                                _subj = f"[{args.camera} PPE-{TAG.upper()}] {vtype} (ID {tid})"
+                                alerts.send_email(_subj, _subj + f" | visitors={len(visitors)}")
+                                alerts.send_whatsapp(_subj)
                     elif not raw_tags:
                         if int(tid) >= 0:
                             ok_visitors.add(int(tid))

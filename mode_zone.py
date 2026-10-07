@@ -16,6 +16,8 @@ import cv2
 import numpy as np
 from ultralytics import YOLO
 
+import alerts  # local: email + WhatsApp (silent no-op without alerts.json)
+
 try:
     import winsound  # Windows-only alarm playback
 except ImportError:
@@ -56,6 +58,8 @@ def main():
     ap.add_argument("--entry-grace", type=int, default=3, help="inside-frames before alarm fires")
     ap.add_argument("--exit-grace", type=int, default=8, help="clear frames before alarm stops")
     ap.add_argument("--photo-every", type=int, default=30, help="seconds between evidence re-captures")
+    ap.add_argument("--alert-cooldown", type=int, default=300,
+                    help="seconds between repeat mail/WhatsApp alerts per zone")
     args = ap.parse_args()
 
     src = int(args.source) if str(args.source).isdigit() else str(args.source)
@@ -139,6 +143,7 @@ def main():
     fps = 0.0
 
     print(f"[OK] Zone_Alert running on {args.source}. Press Q to quit.")
+    alert_throttle = alerts.Throttle(args.alert_cooldown)
     for r in model.track(source=src, stream=True, persist=True, imgsz=args.imgsz,
                          classes=[0], conf=args.conf, verbose=False,
                          vid_stride=2, tracker="bytetrack.yaml"):
@@ -226,6 +231,10 @@ def main():
                 "photo_path": str(photo),
             })
             print(f"[!] Intrusion ID:{first_tid} saved {photo.name}")
+            if alert_throttle.ready((args.camera, first_zone)):  # mail/WhatsApp (no-op w/o alerts.json)
+                _subj = f"[{args.camera} ZONE] intrusion in {first_zone} (ID {first_tid})"
+                alerts.send_email(_subj, _subj, attach=str(photo))
+                alerts.send_whatsapp(_subj)
             entries_run += 1
             entries_today += 1
 
