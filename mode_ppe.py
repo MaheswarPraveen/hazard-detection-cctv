@@ -788,6 +788,7 @@ def main():
                 parts = line.split(",")
                 if len(parts) == 2 and parts[0] in tally:
                     tally[parts[0]] = int(parts[1])
+        save_tally(tally_path, visitors, ok_visitors, tally)  # CSV exists from second zero
         with shared["lock"]:
             shared["models_ready"] = True
         print(f"[OK] masks live (+{time.time() - T0:.0f}s after click)", flush=True)

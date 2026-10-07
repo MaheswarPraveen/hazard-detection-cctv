@@ -115,6 +115,11 @@ def main():
     (EVIDENCE_DIR / today).mkdir(parents=True, exist_ok=True)
     (LOG_DIR).mkdir(parents=True, exist_ok=True)
     csv_path = LOG_DIR / f"incidents_{today}.csv"
+    if not csv_path.exists():  # header now: CSV downloadable even with zero incidents
+        with open(csv_path, "w", newline="") as _f:
+            csv.DictWriter(_f, fieldnames=["time", "camera", "violation_type",
+                                           "track_id", "in_frame_count",
+                                           "photo_path"]).writeheader()
     entries_today = 0
     if csv_path.exists():  # resume today's count across restarts
         with open(csv_path) as _f:

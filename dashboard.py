@@ -229,7 +229,7 @@ class Handler(SimpleHTTPRequestHandler):
             self._json({"modes": alive, "stats": read_stats(), "evidence": evidence_list()})
         elif u.path == "/api/report":
             mode = parse_qs(u.query).get("mode", ["zone"])[0]
-            if mode not in MODES:
+            if mode not in ("zone", "ppe"):  # ppe = merged mh+vg tally report
                 self.send_error(400);
                 return
             subprocess.run([sys.executable, "report.py", "--mode", mode], cwd=BASE,
