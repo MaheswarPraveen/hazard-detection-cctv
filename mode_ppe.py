@@ -382,8 +382,10 @@ def blue_glove_boxes(frame, pbox, face_boxes, spec):
         if _is_textured(gray, bx, by, bw2, bh2):
             continue  # check pattern, not a smooth glove
         _v = _finger_valleys(c)  # >=1 deep valley = finger gaps = hand-shaped
+        if _v < 1:
+            continue  # no finger gaps: shirt patch, sleeve, wall - not a hand
         out.append(([float(x1 + bx), float(y1 + by),
-                     float(x1 + bx + bw2), float(y1 + by + bh2)], 0.90 if _v >= 1 else 0.85))
+                     float(x1 + bx + bw2), float(y1 + by + bh2)], 0.90))
     return out
 
 
