@@ -671,6 +671,10 @@ def main():
                          "plaid shirts false-fire it; solid dark sleeves read cleanest)")
     ap.add_argument("--skin-every", type=int, default=3, help="run bare-hand check every N inferences")
     ap.add_argument("--silent", action="store_true", help="no siren sound - display only")
+    ap.add_argument("--count-after", type=int, default=10,
+                    help="sightings before a track's violations enter the tally (ghost filter)")
+    ap.add_argument("--count-window", type=int, default=60,
+                    help="seconds: same item is not re-tallied station-wide (tracker re-ID churn)")
     ap.add_argument("--alert-cooldown", type=int, default=300,
                     help="seconds between repeat mail/WhatsApp alerts per violation type")
     ap.add_argument("--glove-every", type=int, default=8, help="run 2nd gloves model every N inferences (CPU saver)")
@@ -771,6 +775,8 @@ def main():
         # misreads can never move the board, siren, or tally.
         last_logged = {}  # tid -> (raw, locked) signature: DBG prints transitions only
         seen = defaultdict(int)  # track_id -> consecutive sightings (ghost filter for visitors)
+        counted = defaultdict(set)  # track_id -> items already tallied (once per person per item)
+        last_counted = {}  # tally key -> time: ID churn on one person can't re-count inside the window
         tally = {}
         if "helmet" in CHECKS:
             tally["no_helmet"] = 0
@@ -1101,21 +1107,29 @@ def main():
                     seen[int(tid)] += 1
                     if len(seen) > 2000:
                         seen.clear()
+                        counted.clear()
+                    now_t = time.time()
+                    stable = int(tid) >= 0 and seen[int(tid)] >= args.count_after
                     if int(tid) >= 0 and seen[int(tid)] >= 3:  # stable track only, no ghosts
                         visitors.add(int(tid))
                     if confirmed:
                         vtype = "+".join(confirmed)
+                        if stable:  # tally: each missing item once per person, never on ghosts
+                            _dirty = False
+                            for _tag, _key in (("NO HELMET", "no_helmet"), ("NO VEST", "no_vest"),
+                                               ("NO GLOVES", "no_gloves"), ("NO MASK", "no_mask")):
+                                if _tag not in confirmed or _key not in tally or _key in counted[int(tid)]:
+                                    continue
+                                counted[int(tid)].add(_key)
+                                if now_t - last_counted.get(_key, 0) < args.count_window:
+                                    continue  # same person re-ID'd by the tracker: already counted
+                                last_counted[_key] = now_t
+                                tally[_key] += 1
+                                _dirty = True
+                            if _dirty:
+                                save_tally(tally_path, visitors, ok_visitors, tally)
                         if warn_state.get(int(tid)) != vtype and int(tid) >= 0:  # once per episode
                             warn_state[int(tid)] = vtype
-                            if "NO HELMET" in confirmed and "no_helmet" in tally:
-                                tally["no_helmet"] += 1
-                            if "NO VEST" in confirmed and "no_vest" in tally:
-                                tally["no_vest"] += 1
-                            if "NO GLOVES" in confirmed and "no_gloves" in tally:
-                                tally["no_gloves"] += 1
-                            if "NO MASK" in confirmed and "no_mask" in tally:
-                                tally["no_mask"] += 1
-                            save_tally(tally_path, visitors, ok_visitors, tally)
                             print(f"[WARNING] ID:{tid} {vtype}", flush=True)
                             if alert_throttle.ready((TAG, vtype)):  # mail/WhatsApp (no-op w/o alerts.json)
                                 _subj = f"[{args.camera} PPE-{TAG.upper()}] {vtype} (ID {tid})"

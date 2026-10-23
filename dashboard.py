@@ -13,12 +13,13 @@ import time
 from functools import partial
 from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
-from urllib.parse import urlparse, parse_qs
+from urllib.parse import urlparse, parse_qs, unquote
 
 BASE = Path(__file__).parent
 PORT = 8000
 CAM_SOURCE = "1"  # webcam index or RTSP URL ("0" = built-in fallback)
 procs = {}  # mode -> Popen
+FILE_DIRS = ("logs", "reports", "evidence")  # the only folders /files/ may serve
 
 MODES = {
     "zone": {"file": "mode_zone.py", "name": "Zone Alert", "desc": "Restricted danger-zone intrusion alarm",
@@ -247,7 +248,13 @@ class Handler(SimpleHTTPRequestHandler):
             self.end_headers()
             self.wfile.write(data)
         elif u.path.startswith("/files/"):
-            self.path = u.path[len("/files"):] or "/"
+            rel = u.path[len("/files/"):]
+            # data folders only: never alerts.json, sources or anything else in BASE
+            target = (BASE / unquote(rel)).resolve()
+            if not any(target.is_relative_to((BASE / d).resolve()) for d in FILE_DIRS):
+                self.send_error(403)
+                return
+            self.path = "/" + rel
             super().do_GET()
         else:
             self.send_error(404)

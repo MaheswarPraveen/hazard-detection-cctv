@@ -41,3 +41,7 @@ OPENCODE.md
 .env
 .env.*
 *.env
+
+# Secrets & runtime locks (never commit)
+alerts.json
+*.lock

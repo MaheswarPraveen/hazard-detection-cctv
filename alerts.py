@@ -11,6 +11,7 @@ get an apikey - exact steps at https://www.callmebot.com/blog/free-api-whatsapp-
 """
 import json
 import smtplib
+import threading
 import time
 import urllib.parse
 import urllib.request
@@ -47,7 +48,28 @@ class Throttle:
         return False
 
 
+def _background(fn, *a, **kw):
+    """Fire-and-forget: a slow SMTP/HTTP call must never stall the video loop."""
+    threading.Thread(target=fn, args=a, kwargs=kw, daemon=True).start()
+
+
 def send_email(subject, body, attach=None):
+    """Queue an email in the background (returns at once)."""
+    if not load_cfg().get("email", {}).get("enabled"):
+        return False
+    _background(send_email_now, subject, body, attach)
+    return True
+
+
+def send_whatsapp(text):
+    """Queue a WhatsApp message in the background (returns at once)."""
+    if not load_cfg().get("whatsapp", {}).get("enabled"):
+        return False
+    _background(send_whatsapp_now, text)
+    return True
+
+
+def send_email_now(subject, body, attach=None):
     cfg = load_cfg().get("email", {})
     if not cfg.get("enabled"):
         return False
@@ -75,7 +97,7 @@ def send_email(subject, body, attach=None):
         return False
 
 
-def send_whatsapp(text):
+def send_whatsapp_now(text):
     cfg = load_cfg().get("whatsapp", {})
     if not cfg.get("enabled"):
         return False
@@ -101,6 +123,6 @@ if __name__ == "__main__":
         if not cfg:
             print("[ALERT] no alerts.json - copy alerts.example.json first")
             raise SystemExit(1)
-        send_email("[TEST] Safety CCTV alerts working",
+        send_email_now("[TEST] Safety CCTV alerts working",
                    "Test message from your Safety CCTV station.")
-        send_whatsapp("TEST: Safety CCTV alerts working.")
+        send_whatsapp_now("TEST: Safety CCTV alerts working.")

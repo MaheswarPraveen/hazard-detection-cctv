@@ -110,7 +110,7 @@ def main():
             break
         print(f"[!] Camera open failed (attempt {attempt}/3), retrying in 3s...")
         time.sleep(3)
-    if not cap.isOpened():
+    if cap is None or not cap.isOpened():
         print(f"[X] Cannot open source {args.source} - check camera cable / RTSP URL")
         return
     print(f"[OK] Camera opened: {args.source}")
@@ -144,9 +144,28 @@ def main():
 
     print(f"[OK] Zone_Alert running on {args.source}. Press Q to quit.")
     alert_throttle = alerts.Throttle(args.alert_cooldown)
-    for r in model.track(source=src, stream=True, persist=True, imgsz=args.imgsz,
-                         classes=[0], conf=args.conf, verbose=False,
-                         vid_stride=2, tracker="bytetrack.yaml"):
+    dead_n = 0  # consecutive failed reads (dead-stream detector)
+    while True:
+        # one camera handle only: frames go to the tracker by hand (no 2nd open)
+        cap.grab()  # skip every other frame (old vid_stride=2): halves CPU
+        ok, frame = cap.read()
+        if not ok or frame is None:
+            dead_n += 1
+            if dead_n > 150:  # ~5s of dead stream: reopen in place (counts kept)
+                print("[!] Camera stream dead 5s - reopening (state kept)...", flush=True)
+                cap.release()
+                time.sleep(2)
+                cap = cv2.VideoCapture(src)
+                dead_n = 0
+                if not cap.isOpened():
+                    print("[X] reopen failed - exiting. Close other camera apps / "
+                          "check the cable.", flush=True)
+                    break
+            time.sleep(0.02)
+            continue
+        dead_n = 0
+        r = model.track(frame, persist=True, imgsz=args.imgsz, classes=[0],
+                        conf=args.conf, verbose=False, tracker="bytetrack.yaml")[0]
         frame = r.orig_img
         h, w = frame.shape[:2]
 
