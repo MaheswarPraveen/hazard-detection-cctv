@@ -6,9 +6,10 @@ import argparse
 import json
 from pathlib import Path
 import cv2
+from paths import APP_DIR, get_config_path, get_settings
 
-BASE = Path(__file__).parent
-ZONES_FILE = BASE / "zones.json"
+BASE = APP_DIR
+ZONES_FILE = get_config_path("zones.json")
 
 points = []
 zones = []
@@ -23,8 +24,9 @@ def mouse_cb(event, x, y, flags, param):
 
 def main():
     global points, frame_copy
+    default_src = str(get_settings().get("camera", "0"))
     ap = argparse.ArgumentParser()
-    ap.add_argument("--source", default="0")
+    ap.add_argument("--source", default=default_src)
     args = ap.parse_args()
     src = int(args.source) if str(args.source).isdigit() else str(args.source)
 

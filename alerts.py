@@ -17,9 +17,10 @@ import urllib.parse
 import urllib.request
 from email.message import EmailMessage
 from pathlib import Path
+from paths import APP_DIR, get_config_path
 
-BASE = Path(__file__).parent
-CFG = BASE / "alerts.json"
+BASE = APP_DIR
+CFG = get_config_path("alerts.json")
 
 
 def load_cfg():

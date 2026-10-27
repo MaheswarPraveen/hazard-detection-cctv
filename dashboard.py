@@ -15,22 +15,22 @@ from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import urlparse, parse_qs, unquote
 
-BASE = Path(__file__).parent
-PORT = 8000
-CAM_SOURCE = "1"  # webcam index or RTSP URL ("0" = built-in fallback)
+from paths import (APP_DIR, LOGS_DIR, REPORTS_DIR, EVIDENCE_DIR, CONFIG_DIR,
+                   ASSETS_DIR, get_asset_path, get_settings, ensure_dirs)
+
+BASE = APP_DIR
+ensure_dirs()
 procs = {}  # mode -> Popen
-FILE_DIRS = ("logs", "reports", "evidence")  # the only folders /files/ may serve
+FILE_DIRS = (LOGS_DIR, REPORTS_DIR, EVIDENCE_DIR)  # the only folders /files/ may serve
 
 MODES = {
-    "zone": {"file": "mode_zone.py", "name": "Zone Alert", "desc": "Restricted danger-zone intrusion alarm",
+    "zone": {"file": "mode_zone.py", "sub": "zone", "name": "Zone Alert", "desc": "Restricted danger-zone intrusion alarm",
               "extra": []},
-    "ppe_mh": {"file": "mode_ppe.py", "name": "PPE Mask + Helmet", "desc": "Face-mask & hardhat station",
+    "ppe_mh": {"file": "mode_ppe.py", "sub": "ppe", "name": "PPE Mask + Helmet", "desc": "Face-mask & hardhat station",
                "extra": ["--checks", "helmet,mask", "--silent"]},
-    "ppe_vg": {"file": "mode_ppe.py", "name": "PPE Vest + Gloves", "desc": "Safety-vest & blue-gloves gate (2-3 m)",
-               "extra": ["--checks", "vest,gloves", "--imgsz", "416", "--silent", "--skin"]},
-    # NOTE: ppe_v8m.pt proved stone-blind on this feed (zero boxes at conf 0.05
-    # across all scenes) so it ships DISABLED. Gloves come back with fine-tuned
-    # weights: add "--gloves-model best.pt" above when they exist.
+    "ppe_vg": {"file": "mode_ppe.py", "sub": "ppe", "name": "PPE Helmet + Vest + Gloves", "desc": "Hardhat, safety-vest & gloves gate (2-3 m)",
+               "extra": ["--checks", "helmet,vest,gloves", "--imgsz", "416", "--silent", "--skin",
+                         "--gloves-model", "ppe_ft.pt", "--glove-imgsz", "640", "--glove-every", "3"]},  # fine-tuned on our gloves (Kaggle, 36 shots)
 }
 CAM_MODES = ("zone", "ppe_mh", "ppe_vg")  # share one camera: only one runs at a time
 LOCK_OF = {"zone": "zone.lock", "ppe_mh": "ppe_mh.lock", "ppe_vg": "ppe_vg.lock"}
@@ -161,7 +161,7 @@ async function ctl(m,a){ await fetch('/api/'+a+'?mode='+m,{method:'POST'}); setT
 refresh(); setInterval(refresh,3000);
 </script></body></html>
 """
-PAGE = (BASE / "console.html").read_text(encoding="utf-8")
+PAGE = get_asset_path("console.html").read_text(encoding="utf-8")
 
 
 def today_str():
@@ -172,13 +172,13 @@ def today_str():
 def read_stats():
     day = today_str()
     stats = {"entries": 0, "visitors": 0, "no_helmet": 0, "no_vest": 0, "no_mask": 0, "no_gloves": 0}
-    zp = BASE / "logs" / f"incidents_{day}.csv"
+    zp = LOGS_DIR / f"incidents_{day}.csv"
     if zp.exists():
         with open(zp) as f:
             stats["entries"] = max(0, sum(1 for _ in f) - 1)
     for name in (f"ppe_stats_{day}.csv", f"ppe_hv_stats_{day}.csv", f"ppe_mg_stats_{day}.csv",
-                 f"ppe_mh_stats_{day}.csv", f"ppe_vg_stats_{day}.csv"):
-        pp = BASE / "logs" / name
+                 f"ppe_mh_stats_{day}.csv", f"ppe_vg_stats_{day}.csv", f"ppe_hvg_stats_{day}.csv"):
+        pp = LOGS_DIR / name
         if pp.exists():
             with open(pp) as f:
                 for row in csv.DictReader(f):
@@ -189,7 +189,7 @@ def read_stats():
 
 def evidence_list(limit=24):
     day = today_str()
-    d = BASE / "evidence" / day
+    d = EVIDENCE_DIR / day
     if not d.exists():
         return []
     files = sorted(d.glob("*.jpg"), key=lambda p: p.stat().st_mtime, reverse=True)[:limit]
@@ -218,7 +218,7 @@ class Handler(SimpleHTTPRequestHandler):
             day = today_str()
             page = PAGE.replace("PLACEHOLDER_ZONE", f"incidents_{day}.csv") \
                        .replace("PLACEHOLDER_PPE_MH", f"ppe_mh_stats_{day}.csv") \
-                       .replace("PLACEHOLDER_PPE_VG", f"ppe_vg_stats_{day}.csv")
+                       .replace("PLACEHOLDER_PPE_HVG", f"ppe_hvg_stats_{day}.csv")
             body = page.encode()
             self.send_response(200)
             self.send_header("Content-Type", "text/html; charset=utf-8")
@@ -231,14 +231,17 @@ class Handler(SimpleHTTPRequestHandler):
         elif u.path == "/api/report":
             mode = parse_qs(u.query).get("mode", ["zone"])[0]
             if mode not in ("zone", "ppe"):  # ppe = merged mh+vg tally report
-                self.send_error(400);
+                self.send_error(400)
                 return
-            subprocess.run([sys.executable, "report.py", "--mode", mode], cwd=BASE,
-                           capture_output=True)
+            if getattr(sys, "frozen", False):
+                cmd = [sys.executable, "--run", "report", "--mode", mode]
+            else:
+                cmd = [sys.executable, "report.py", "--mode", mode]
+            subprocess.run(cmd, cwd=BASE, capture_output=True)
             day = today_str()
-            xlsx = BASE / "reports" / f"{mode}_report_{day}.xlsx"
+            xlsx = REPORTS_DIR / f"{mode}_report_{day}.xlsx"
             if not xlsx.exists():
-                self.send_error(404, "No data for report yet");
+                self.send_error(404, "No data for report yet")
                 return
             data = xlsx.read_bytes()
             self.send_response(200)
@@ -248,10 +251,18 @@ class Handler(SimpleHTTPRequestHandler):
             self.end_headers()
             self.wfile.write(data)
         elif u.path.startswith("/files/"):
-            rel = u.path[len("/files/"):]
-            # data folders only: never alerts.json, sources or anything else in BASE
-            target = (BASE / unquote(rel)).resolve()
-            if not any(target.is_relative_to((BASE / d).resolve()) for d in FILE_DIRS):
+            rel = unquote(u.path[len("/files/"):])
+            # data folders only: never alerts.json, sources or anything outside FILE_DIRS
+            target = (BASE / rel).resolve()
+            allowed = False
+            for d in FILE_DIRS:
+                try:
+                    if target.is_relative_to(d.resolve()) and target.is_file():
+                        allowed = True
+                        break
+                except Exception:
+                    pass
+            if not allowed:
                 self.send_error(403)
                 return
             self.path = "/" + rel
@@ -266,7 +277,7 @@ class Handler(SimpleHTTPRequestHandler):
         if u.path == "/api/start" and mode in MODES:
             old = procs.get(mode)
             if old is not None and old.poll() is None:
-                self._json({"ok": True, "already": True});
+                self._json({"ok": True, "already": True})
                 return
             for other in CAM_MODES:  # one camera: starting one station stops the others
                 if other != mode:
@@ -274,15 +285,22 @@ class Handler(SimpleHTTPRequestHandler):
                     if p is not None and p.poll() is None:
                         p.terminate()
             reap_all_cameras()  # plus any orphan (even retired profiles) holding the camera
-            log = open(BASE / f"{mode}_dash.log", "ab")
+            log = open(LOGS_DIR / f"{mode}_dash.log", "ab")
             flags = 0
             if sys.platform == "win32":
                 flags = 0x00000008 | 0x00000200  # DETACHED_PROCESS | NEW_PROCESS_GROUP
+            cam_source = str(get_settings().get("camera", "1"))
+            if getattr(sys, "frozen", False):
+                cmd = [sys.executable, "--run", MODES[mode]["sub"], "--source", cam_source, "--camera", "CAM01"] + MODES[mode].get("extra", [])
+            else:
+                cmd = [sys.executable, "-u", MODES[mode]["file"], "--source", cam_source, "--camera", "CAM01"] + MODES[mode].get("extra", [])
+            env = dict(os.environ)
+            env["PYTHONUNBUFFERED"] = "1"
             procs[mode] = subprocess.Popen(
-                [sys.executable, "-u", MODES[mode]["file"], "--source", CAM_SOURCE, "--camera", "CAM01"]
-                + MODES[mode].get("extra", []),
+                cmd,
                 cwd=BASE, stdout=log, stderr=subprocess.STDOUT,
                 stdin=subprocess.DEVNULL, close_fds=True,
+                env=env,
                 creationflags=flags)
             self._json({"ok": True, "pid": procs[mode].pid})
         elif u.path == "/api/stop" and mode in MODES:
@@ -294,9 +312,14 @@ class Handler(SimpleHTTPRequestHandler):
             self.send_error(404)
 
 
-if __name__ == "__main__":
+def run_server(port=None):
     reap_all_cameras()  # clean up strays from a previous dashboard run
+    p = int(port or get_settings().get("port", 8000))
     handler = partial(Handler, directory=str(BASE))
-    srv = ThreadingHTTPServer(("127.0.0.1", PORT), handler)
-    print(f"[OK] Dashboard at http://localhost:{PORT}")
+    srv = ThreadingHTTPServer(("127.0.0.1", p), handler)
+    print(f"[OK] Dashboard at http://localhost:{p}")
     srv.serve_forever()
+
+
+if __name__ == "__main__":
+    run_server()

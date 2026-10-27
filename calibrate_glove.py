@@ -15,13 +15,16 @@ from pathlib import Path
 
 import cv2
 import numpy as np
+from paths import APP_DIR, get_config_path, get_settings
 
-BASE = Path(__file__).parent
+BASE = APP_DIR
+GLOVE_HSV_FILE = get_config_path("glove_hsv.json")
 
 
 def main():
+    default_src = str(get_settings().get("camera", "1"))
     ap = argparse.ArgumentParser()
-    ap.add_argument("--source", default="1")
+    ap.add_argument("--source", default=default_src)
     args = ap.parse_args()
     src = int(args.source) if str(args.source).isdigit() else str(args.source)
     cap = cv2.VideoCapture(src)
@@ -60,7 +63,8 @@ def main():
             fused = np.median(np.stack(samples), axis=0)
             spec = {"h": float(fused[0]), "s": float(fused[1]), "v": float(fused[2]),
                     "n": len(samples)}
-            (BASE / "glove_hsv.json").write_text(json.dumps(spec))
+            GLOVE_HSV_FILE.parent.mkdir(parents=True, exist_ok=True)
+            GLOVE_HSV_FILE.write_text(json.dumps(spec))
             lo = np.array([max(0, fused[0] - 10), max(0, fused[1] - 35), max(0, fused[2] - 60)],
                           dtype=np.uint8)
             hi = np.array([min(179, fused[0] + 10), 255, 255], dtype=np.uint8)

@@ -7,8 +7,9 @@ import argparse
 from datetime import datetime
 from pathlib import Path
 import pandas as pd
+from paths import APP_DIR, LOGS_DIR, REPORTS_DIR
 
-BASE = Path(__file__).parent
+BASE = APP_DIR
 PREFIX = {"zone": "incidents", "ppe": "ppe_incidents"}
 
 def main():
@@ -16,12 +17,12 @@ def main():
     ap.add_argument("--mode", default="zone", choices=["zone", "ppe"])
     ap.add_argument("--date", default=datetime.now().strftime("%Y-%m-%d"))
     args = ap.parse_args()
-    out = BASE / "reports" / f"{args.mode}_report_{args.date}.xlsx"
+    out = REPORTS_DIR / f"{args.mode}_report_{args.date}.xlsx"
     out.parent.mkdir(parents=True, exist_ok=True)
     if args.mode == "ppe":  # counts-only tallies: merge stations (+ legacy files)
         frames = []
-        for tag in ("ppe", "ppe_hv", "ppe_mg", "ppe_mh", "ppe_vg"):
-            csv_path = BASE / "logs" / f"{tag}_stats_{args.date}.csv"
+        for tag in ("ppe", "ppe_hv", "ppe_mg", "ppe_mh", "ppe_vg", "ppe_hvg"):
+            csv_path = LOGS_DIR / f"{tag}_stats_{args.date}.csv"
             if csv_path.exists():
                 df = pd.read_csv(csv_path)
                 df["station"] = tag
@@ -36,7 +37,7 @@ def main():
             summary.to_excel(w, sheet_name="Combined", index=False)
         print(f"[OK] {out} (PPE tally, {len(frames)} station file(s))")
         return
-    csv_path = BASE / "logs" / f"{PREFIX[args.mode]}_{args.date}.csv"
+    csv_path = LOGS_DIR / f"{PREFIX[args.mode]}_{args.date}.csv"
     if not csv_path.exists():
         print(f"[!] No log yet: {csv_path}")
         return

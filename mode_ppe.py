@@ -51,9 +51,12 @@ try:
 except ImportError:
     winsound = None
 
-BASE = Path(__file__).parent
-ALARM_WAV = BASE / "alarm.wav"
-TRACKER_YAML = BASE / "tracker_ppe.yaml"  # long-memory ByteTrack (falls back to stock if missing)
+from paths import (APP_DIR, LOGS_DIR, EVIDENCE_DIR, get_config_path,
+                   get_asset_path, get_model_path)
+
+BASE = APP_DIR
+ALARM_WAV = get_asset_path("alarm.wav")
+TRACKER_YAML = get_model_path("tracker_ppe.yaml")  # long-memory ByteTrack (falls back to stock if missing)
 IMG_EXTS = {".jpg", ".jpeg", ".png", ".bmp", ".webp"}
 T0 = time.time()  # process start (the imports above already cost ~10s on CPU-only machines)
 
@@ -411,7 +414,7 @@ def _hand_material(frame, hbox, blue_spec):
                        max(0.0, blue_spec["v"] - 60)], dtype=np.uint8)
         hi = np.array([min(179.0, blue_spec["h"] + 10), 255, 255], dtype=np.uint8)
         blue = cv2.inRange(hsv, lo, hi)
-        if float(blue.mean()) / 255.0 > 0.25:
+        if float(blue.mean()) / 255.0 > 0.40:  # glove must cover most of the hand box
             return "blue"
     return "unknown"
 
@@ -457,7 +460,7 @@ def load_models(args, checks):
     """Load primary (+ optional gloves backup) weights. Nano takes ~10s,
     ppe_v8m adds ~30s on CPU. The live window is already up meanwhile, so the
     user sees video + a LOADING banner instead of a dead click."""
-    wpath = BASE / args.model if not Path(args.model).exists() else Path(args.model)
+    wpath = get_model_path(args.model)
     model = YOLO(str(wpath))
     ids = resolve_ids(model)
     has_mask = (ids["MASK"] is not None or ids["NO_MASK"] is not None) and not args.ignore_mask \
@@ -467,7 +470,7 @@ def load_models(args, checks):
 
     gmodel, gids = None, {}
     if args.gloves_model and not args.ignore_gloves and "gloves" in checks:
-        gpath = BASE / args.gloves_model if not Path(args.gloves_model).exists() else Path(args.gloves_model)
+        gpath = get_model_path(args.gloves_model)
         if gpath.exists():
             gmodel = YOLO(str(gpath))
             gids = resolve_ids(gmodel)
@@ -697,7 +700,7 @@ def main():
         return
     CHECK_MH = CHECKS == {"helmet", "mask"}
     CHECK_VG = CHECKS == {"vest", "gloves"}
-    TAG = "mh" if CHECK_MH else "vg" if CHECK_VG else "all" if len(CHECKS) == 4 else "custom"
+    TAG = "mh" if CHECK_MH else "vg" if CHECK_VG else "hvg" if CHECKS == {"helmet", "vest", "gloves"} else "all" if len(CHECKS) == 4 else "custom"
 
     # single-photo test path (loads models itself, no camera needed)
     if Path(str(args.source)).suffix.lower() in IMG_EXTS and Path(str(args.source)).exists():
@@ -791,7 +794,7 @@ def main():
         if HAS_MASK:
             tally["no_mask"] = 0
         tally_name = f"ppe_stats_{today}.csv" if TAG == "all" else f"ppe_{TAG}_stats_{today}.csv"
-        tally_path = BASE / "logs" / tally_name
+        tally_path = LOGS_DIR / tally_name
         print(f"[INFO] profile checks={sorted(CHECKS)} tally={tally_name}", flush=True)
         if tally_path.exists():  # resume today's counts across restarts
             for line in tally_path.read_text().splitlines()[1:]:
@@ -806,7 +809,7 @@ def main():
             # slow 49MB backup loads now, in background: masks already judging.
             try:
                 print("[...] loading gloves backup in background (masks already live)...", flush=True)
-                _gpath = BASE / _gm_arg if not Path(_gm_arg).exists() else Path(_gm_arg)
+                _gpath = get_model_path(_gm_arg)
                 gmodel = YOLO(str(_gpath))
                 gids = resolve_ids(gmodel)
                 if gids["GLOVES"] is None and gids["NO_GLOVES"] is None:
@@ -830,7 +833,7 @@ def main():
                 import mediapipe as _mp
                 from mediapipe.tasks import python as _mp_python
                 from mediapipe.tasks.python import vision as _mp_vision
-                _bo = _mp.tasks.BaseOptions(model_asset_path=str(BASE / "hand_landmarker.task"))
+                _bo = _mp.tasks.BaseOptions(model_asset_path=str(get_model_path("hand_landmarker.task")))
                 _ho = _mp_vision.HandLandmarkerOptions(
                     base_options=_bo, num_hands=4,
                     min_hand_detection_confidence=0.3, min_tracking_confidence=0.3)
@@ -841,7 +844,7 @@ def main():
                 print(f"[!] hand landmarks unavailable: {e}", flush=True)
                 hand_det = None
         blue_spec = None
-        _hspec = BASE / "glove_hsv.json"
+        _hspec = get_config_path("glove_hsv.json")
         if _hspec.exists() and ("gloves" in CHECKS):
             try:
                 blue_spec = json.loads(_hspec.read_text())
@@ -964,7 +967,8 @@ def main():
                     nogloves = list(nogloves) + list(last_skin)
 
                 # calibrated blue: YOUR glove color -> positive glove evidence.
-                if blue_spec is not None and persons and frame_n % args.skin_every == 0:
+                use_blue = blue_spec is not None  # calibrated blue + trained model together (blue alone missed less live)
+                if use_blue and persons and frame_n % args.skin_every == 0:
                     try:
                         bb = []
                         for (pbox, _tid, _pc) in persons:
@@ -975,8 +979,8 @@ def main():
                         last_blue = bb
                     except Exception as e:
                         print(f"[!] blue-glove check skipped: {e}", flush=True)
-                if blue_spec is not None:
-                    gloves = list(gloves) + list(last_blue)
+                # loose blue blobs are NOT glove evidence (a blue shirt went green);
+                # blue only counts when it sits on a landmarked hand (below).
 
                 # hand landmarks: true shape detection. Each landmarked hand is
                 # associated to a person, then read for material (bare/blue).
@@ -1009,7 +1013,7 @@ def main():
                 for (_hb2, _kind2) in last_hands:
                     if _kind2 == "bare":
                         nogloves.append(([_hb2[0], _hb2[1], _hb2[2], _hb2[3]], 0.92))
-                    elif _kind2 == "blue":
+                    elif _kind2 == "blue" and use_blue:
                         gloves.append(([_hb2[0], _hb2[1], _hb2[2], _hb2[3]], 0.90))
 
                 # face-zoom second look for tiny masks (the 2m+ fix)

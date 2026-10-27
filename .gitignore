@@ -45,3 +45,11 @@ OPENCODE.md
 # Secrets & runtime locks (never commit)
 alerts.json
 *.lock
+train_kaggle.ipynb
+dataset/
+best.pt
+
+# Build and distribution artifacts
+build/
+dist/
+

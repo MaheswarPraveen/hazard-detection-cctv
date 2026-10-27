@@ -23,11 +23,13 @@ try:
 except ImportError:
     winsound = None
 
-BASE = Path(__file__).parent
-LOG_DIR = BASE / "logs"
-EVIDENCE_DIR = BASE / "evidence"
-ZONES_FILE = BASE / "zones.json"
-ALARM_WAV = BASE / "alarm.wav"
+from paths import APP_DIR, LOGS_DIR, EVIDENCE_DIR, get_config_path, get_asset_path, get_model_path
+
+BASE = APP_DIR
+LOG_DIR = LOGS_DIR
+EVIDENCE_DIR = EVIDENCE_DIR
+ZONES_FILE = get_config_path("zones.json")
+ALARM_WAV = get_asset_path("alarm.wav")
 COOLDOWN_SEC = 5  # one snapshot per track_id per 5s
 
 
@@ -68,9 +70,7 @@ def main():
         print("[!] No zones.json found. Run: python define_zones.py --source 0 first")
         print("    (click polygon points, press S to save, Q to quit)")
 
-    wpath = Path(args.model)
-    if not wpath.exists():
-        wpath = BASE / args.model  # weights live next to the script
+    wpath = get_model_path(args.model)
     model = YOLO(str(wpath))  # person class = 0
     print("[...] Warming up model (3 dummy frames)...")
     _warm = np.zeros((480, 480, 3), dtype=np.uint8)

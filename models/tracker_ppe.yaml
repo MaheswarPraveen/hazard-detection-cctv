@@ -1,0 +1,10 @@
+# PPE tracker tuning: longer memory than stock bytetrack so walking people keep
+# their IDs (worker samples at ~5-10 Hz, so 90 frames ~= 9-15 s of memory),
+# and a stricter new-track bar so 1-frame ghost boxes don't mint visitor IDs.
+tracker_type: bytetrack # (str) Tracker backend: bytetrack
+track_high_thresh: 0.25 # (float) First-stage match threshold
+track_low_thresh: 0.1 # (float) Second-stage threshold for low-score matches
+new_track_thresh: 0.4 # (float) Start a new track only on solid detections (stock 0.25)
+track_buffer: 90 # (int) Frames to keep lost tracks alive (stock 30)
+match_thresh: 0.8 # (float) Association similarity threshold (IoU/cost)
+fuse_score: True # (bool) Fuse detection score with motion/IoU for matching

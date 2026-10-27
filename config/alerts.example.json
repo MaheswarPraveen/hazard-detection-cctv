@@ -1,0 +1,15 @@
+{
+  "email": {
+    "enabled": false,
+    "host": "smtp.gmail.com",
+    "port": 587,
+    "user": "you@gmail.com",
+    "password": "APP-PASSWORD-HERE (Gmail: Security -> 2-Step Verification -> App passwords)",
+    "to": "boss@company.com"
+  },
+  "whatsapp": {
+    "enabled": false,
+    "phone": "919876543210 (country code + number, no + spaces)",
+    "apikey": "PASTE-APIKEY (message the CallMeBot bot from your WhatsApp first)"
+  }
+}
